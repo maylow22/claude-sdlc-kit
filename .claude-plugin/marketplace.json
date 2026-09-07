@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-kit",
+  "description": "Vlastní Claude Code nástroje a workflow — mimo SDLC kit.",
+  "owner": {
+    "name": "Miloslav Marel",
+    "email": "miloslav.marel@gem.cz"
+  },
+  "plugins": [
+    {
+      "name": "claude-monitor",
+      "description": "Live dashboard všech Claude Code sessions na stroji — stav, tokeny, kontext, strom subagentů a průběh workflow.",
+      "author": { "name": "Miloslav Marel" },
+      "category": "productivity",
+      "source": "./plugins/claude-monitor"
+    }
+  ]
+}
