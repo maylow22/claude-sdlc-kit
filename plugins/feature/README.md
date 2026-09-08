@@ -1,6 +1,8 @@
 # feature
 
-Workflow pro vývoj jedné feature od zadání po PR. Tři commandy, jeden namespace:
+Workflow pro vývoj jedné feature od zadání po PR. Tři commandy, jeden namespace.
+Žádný stavový soubor ani vlastní tracking — postup vidíš v terminálu, subagenty
+v [claude-monitoru](../claude-monitor).
 
 | Command | Co dělá |
 |---|---|
@@ -49,12 +51,6 @@ pokračování — jinak by si kontext natáhli zpátky.
 
 Zadání, plán, konzultace, commit & push. Bez výslovného souhlasu workflow necommituje,
 nepushuje ani nevytváří PR (PR se jen vygeneruje jako odkaz — `gh` se nepoužívá).
-
-## Průběh v dashboardu
-
-Workflow zapisuje stav do `~/.claude/flow/$CLAUDE_CODE_SESSION_ID.json`, který čte plugin
-[claude-monitor](../claude-monitor) (`/claude-monitor:start`). Čekací brány se hlásí jako
-`wait`, takže je z dashboardu vidět, že se čeká na člověka, a ne na model.
 
 ## Konvence napevno
 

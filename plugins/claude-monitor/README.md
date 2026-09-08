@@ -15,7 +15,6 @@ python3 tools/claude_monitor.py --port 8787 --open
 - **stav** — busy / idle / blocked, pid, kind (interactive/background), projekt, živý git branch
 - **tokeny** — output, input, cache read/write, thinking; obsazení kontextového okna
 - **strom subagentů** — agentType, popis, output tokeny, jak dávno byl aktivní
-- **průběh workflow** — volitelný pruh kroků, viz níže
 
 ## Zdroje dat
 
@@ -25,49 +24,10 @@ python3 tools/claude_monitor.py --port 8787 --open
 | tokeny, model, effort | `~/.claude/projects/<slug>/<sessionId>.jsonl` → `.message.usage` |
 | strom subagentů | `<sessionId>/subagents/agent-*.meta.json` |
 | git branch | `git -C <cwd> branch --show-current` (živě — v transcriptu bývá zastaralý) |
-| průběh workflow | `~/.claude/flow/<sessionId>.json` (zapisuje si sám agent) |
 | usage cockpit | `~/.claude.json` → `cachedUsageUtilization` (cache, kterou plní `/usage`) |
 
 Transcripty se čtou inkrementálně (pamatuje si offset), takže refresh je konstantně levný
 i u vícemegabajtových souborů.
-
-## Průběh workflow (volitelné)
-
-Jakýkoli command/skill může hlásit svůj postup — v tomto kitu to dělá plugin
-[feature](../feature) (`/feature:start`) — zapíše
-`~/.claude/flow/$CLAUDE_CODE_SESSION_ID.json`:
-
-```json
-{
-  "flow": "feature",
-  "task": "IF-9 — rozbalit informace",
-  "steps": [
-    {"name": "4 Implementace", "status": "done"},
-    {"name": "5 E2E testy", "status": "running", "note": "3/7 testů"},
-    {"name": "6 Review", "status": "wait", "note": "čeká na odsouhlasení"}
-  ]
-}
-```
-
-`status`: `todo` | `running` | `wait` | `done` | `skip` | `fail`.
-`wait` = blokován na uživateli (jantarově) — z dashboardu poznáš, že session nedře,
-ale čeká na tebe.
-
-## Vývoj
-
-Plugin se instaluje jako **kopie** do `~/.claude/plugins/cache/claude-kit/claude-monitor/<verze>/`,
-takže změny v repu se samy neprojeví. Místo reinstalace stačí kopii nahradit symlinkem
-(uděláno, dokud se nezmění verze v `plugin.json`):
-
-```bash
-cd ~/.claude/plugins/cache/claude-kit/claude-monitor
-rm -rf 0.1.0 && ln -s ~/Workspace/claude-kit/plugins/claude-monitor 0.1.0
-```
-
-Jednorázově bez instalace: `claude --plugin-dir ~/Workspace/claude-kit/plugins/claude-monitor`.
-
-Server drží HTML v paměti, takže po editaci je stejně potřeba restart:
-`kill $(lsof -ti:8787)` a spustit znovu.
 
 ## Pasti
 

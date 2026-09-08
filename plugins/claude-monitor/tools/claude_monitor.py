@@ -24,7 +24,6 @@ from pathlib import Path
 
 PROJECTS = Path.home() / ".claude" / "projects"
 CONFIG = Path.home() / ".claude.json"
-FLOWS = Path.home() / ".claude" / "flow"  # <sessionId>.json zapisuje sam agent
 SUBAGENT_ACTIVE_SEC = 60
 
 # Velikosti kontextovych oken (zdroj: skill claude-api). Cela Claude 5 rodina
@@ -202,32 +201,6 @@ def read_usage() -> dict | None:
     return _usage["data"]
 
 
-def read_flow(session_id: str) -> dict | None:
-    """Volitelny postup workflow, ktery si session sama zapisuje do
-    ~/.claude/flow/<sessionId>.json  (kontrakt viz plugin feature, /feature:start)."""
-    f = FLOWS / f"{session_id}.json"
-    try:
-        d = json.loads(f.read_text())
-    except (OSError, ValueError):
-        return None
-    steps = d.get("steps")
-    if not isinstance(steps, list):
-        return None
-    return {
-        "flow": str(d.get("flow") or "flow"),
-        "task": str(d.get("task") or ""),
-        "steps": [
-            {
-                "name": str(s.get("name", "?")),
-                "status": str(s.get("status", "todo")),
-                "note": str(s.get("note", "")),
-            }
-            for s in steps
-            if isinstance(s, dict)
-        ],
-    }
-
-
 def git_branch(cwd: str, cache: dict[str, str | None]) -> str | None:
     """Zivy branch pracovniho adresare. Branch je vlastnost worktree, ne session -
     branch zapsany v transcriptu je u necinnych sessions zastaraly."""
@@ -293,7 +266,6 @@ def build_state() -> dict:
                     for k in ("input", "output", "cache_read", "cache_write", "thinking")
                 },
                 "mtime": mtime,
-                "flow": read_flow(sid),
                 "subagents": subagents(path, sid) if path else [],
             }
         )
@@ -354,18 +326,6 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .toks{display:grid;grid-template-columns:1fr 1fr;gap:1px 12px;font-size:12px;color:var(--dim)}
 .toks b{color:var(--fg);font-weight:550;font-variant-numeric:tabular-nums;float:right}
 .warn{color:var(--warn);font-size:11.5px;margin-top:8px}
-.flow{margin:0 0 9px}
-.flow .task{font-size:12px;margin-bottom:5px}
-.flow .task b{font-weight:620}
-.steps{display:flex;flex-wrap:wrap;gap:4px}
-.step{font-size:11px;padding:1px 7px;border-radius:5px;border:1px solid var(--line);color:var(--dim)}
-.step.done{color:var(--idle);border-color:currentColor}
-.step.running,.step.wait{font-weight:650;border-color:currentColor}
-.step.running{color:var(--busy)}
-.step.wait{color:var(--warn)}
-.step.fail{color:#f2776b;border-color:currentColor;font-weight:650}
-.step.skip{opacity:.45;text-decoration:line-through}
-.note{font-size:11.5px;color:var(--dim);margin-top:5px}
 .subs{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
 .subs>div{display:flex;gap:7px;align-items:baseline;font-size:12px;padding:2px 0}
 .dot{width:6px;height:6px;border-radius:99px;background:var(--bar2);flex:none;margin-top:5px}
@@ -403,20 +363,6 @@ function cockpit(u, now){
   }).join("");
 }
 
-function flowHtml(f){
-  if(!f) return "";
-  const chips = f.steps.map(st =>
-    `<span class="step ${esc(st.status)}">${esc(st.name)}</span>`).join("");
-  const cur = f.steps.find(st => st.status === "wait")
-           || f.steps.find(st => st.status === "running")
-           || f.steps.find(st => st.status === "fail");
-  return `<div class="flow">
-    <div class="task"><b>${esc(f.flow)}</b>${f.task ? " · "+esc(f.task) : ""}</div>
-    <div class="steps">${chips}</div>
-    ${cur && cur.note ? `<div class="note">${cur.status === "wait" ? "⏸" : "▸"} ${esc(cur.note)}</div>` : ""}
-  </div>`;
-}
-
 function card(s, now){
   const st = s.state === "blocked" ? "blocked" : s.status;
   const pct = s.contextLimit ? Math.min(100, 100*s.context/s.contextLimit) : 0;
@@ -431,7 +377,6 @@ function card(s, now){
     <div class="meta">${esc(s.project)}${s.branch?" · "+esc(s.branch):""} · ${esc(s.kind)}
       · pid ${s.pid} · ${esc(s.model||"?")}${s.effort?" / "+esc(s.effort):""}
       <br>${s.turns} turnu · aktivita pred ${ago(s.mtime, now)}</div>
-    ${flowHtml(s.flow)}
     <div class="bar"><i style="width:${pct}%"></i></div>
     <div class="toks">
       <div>kontext <b>${n(s.context)} / ${n(s.contextLimit)}</b></div>

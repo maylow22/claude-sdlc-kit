@@ -21,40 +21,6 @@ Pokud argument chybí, **zeptej se** uživatele co implementovat — nepokračuj
 - Mechanický úklid (formatter, lint, typecheck) je taky subagent — jeho výstup bývá
   nejdelší a nejméně zajímavý z celého workflow, tak ať nesedí v hlavním kontextu.
 
-## Průběh (pro monitoring)
-
-Workflow hlásí svůj stav do `~/.claude/flow/$CLAUDE_CODE_SESSION_ID.json` — čte ho live
-dashboard (plugin `claude-monitor`, spuštění `/claude-monitor:start`). Soubor **přepiš celý**
-hned na začátku (všechny kroky `todo`) a pak vždy, když se změní stav kteréhokoli kroku.
-
-```json
-{
-  "flow": "feature",
-  "task": "IF-9 — rozbalit informace",
-  "steps": [
-    {"name": "1 Zadání", "status": "done"},
-    {"name": "2 Branch", "status": "done", "note": "feature/IF-9-rozbalit-informace"},
-    {"name": "3 Plán", "status": "wait", "note": "čeká na odsouhlasení plánu"},
-    {"name": "4 Implementace", "status": "todo"},
-    {"name": "5 E2E testy", "status": "todo"},
-    {"name": "6 Lint & formát (sub)", "status": "todo"},
-    {"name": "7 Review + bezpečnost (sub)", "status": "todo"},
-    {"name": "8 Opravy nálezů", "status": "todo"},
-    {"name": "9 Dokumentace (sub)", "status": "todo"},
-    {"name": "10 Konzultace", "status": "todo"},
-    {"name": "11 Commit & PR", "status": "todo"}
-  ]
-}
-```
-
-- `status`: `todo` | `running` | `wait` (blokován na uživateli) | `done` | `skip` | `fail`
-- `note` piš jen u kroku, který právě běží nebo na něco čeká — dashboard ho zobrazuje
-- `wait` používej u všech čekacích bran (kroky 1, 3, 10, 11), ať je z dashboardu vidět,
-  že se čeká na tebe a ne na model
-- `(sub)` v názvu značí krok běžící v izolovaných subagentech — dashboard je stejně ukáže
-  ve stromu subagentů pod session
-- selhání kroku = `fail` + `note` s důvodem; nikdy stav nepřepisuj zpětně na `done`
-
 ## Postup
 
 ### 1. Zadání
@@ -99,7 +65,7 @@ Reviewery pouštěj až na uklizený kód, ať nálezy nejsou o formátování.
 - `feature:reviewer` — correctness + simplify optika
 - `feature:security-reviewer` — bezpečnost; **skipni ho**, pokud se diff nedotýká
   security plochy (vstupy od uživatele, auth, práva, API odpovědi, tajemství, závislosti,
-  práce se soubory) — do flow zapiš `skip` s důvodem
+  práce se soubory) — jen napiš uživateli proč
 
 Prompt pro oba obsahuje **jen** tohle a nic dalšího:
 - `baseBranch` (`develop`) a `branch`
@@ -124,7 +90,7 @@ uživatel odsouhlasil, ani tvoje shrnutí implementace. Kdyby to znali, jen ti t
 - Spusť `feature:doc-writer` (`baseBranch`, `branch`, zadání). Vidí hotový kód, ne cestu k němu.
 - Běží **až po opravách**, aby nedokumentoval stav, který se ještě změní.
 - **Skipni ho**, pokud jde o triviální změnu (překlep, copy, styl, čistě interní refaktoring
-  beze změny chování) — do flow zapiš `skip` s důvodem.
+  beze změny chování) — jen napiš uživateli proč.
 - Doc-writer si sám vyhodnotí wiki (`/feature:wiki`), CHANGELOG i `docs/**`. Jeho report
   ukaž uživateli v kroku 10 — nepřepisuj ho po něm.
 
@@ -152,9 +118,8 @@ uživatel odsouhlasil, ani tvoje shrnutí implementace. Kdyby to znali, jen ti t
 - **Nikdy** `--no-verify`, `--amend`, `reset --hard`, force push.
 - Branch vždy z aktuálního `develop`, ne z `main` ani z jiné feature.
 - Pokud E2E test selže opakovaně z důvodu mimo zadání (existující bug), zastav se a zeptej.
-- Komunikace s uživatelem česky.
+- Komunikace s uživatelem česky. Kde jsi v postupu, hlas krátce v odpovědi — žádný
+  stavový soubor se nikam nezapisuje.
 - Kontrolní agenty (linter, reviewery, doc-writer) spouštěj **vždy jako nový subagent** s čistým kontextem. Nikdy jim
   neposílej průběh vývoje ani je nenech pokračovat v už rozjeté konverzaci — izolace kontextu
   je celý důvod, proč jsou to subagenti.
-- Stavový soubor aktualizuj **před** tím, než se zeptáš uživatele nebo spustíš dlouhý krok —
-  jinak dashboard ukazuje zastaralý stav právě ve chvíli, kdy se na něj někdo dívá.
