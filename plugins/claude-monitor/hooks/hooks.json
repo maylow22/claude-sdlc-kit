@@ -1,0 +1,16 @@
+{
+  "description": "Pri startu session nastartuje dashboard, pokud jeste nejede, a posle jeho URL do kontextu.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

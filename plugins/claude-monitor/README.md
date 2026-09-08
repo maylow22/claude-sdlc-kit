@@ -4,9 +4,25 @@ Live dashboard všech Claude Code sessions běžících na stroji. Zero-dep Pyth
 (stdlib), servíruje samostatnou HTML stránku s auto-refreshem 3 s.
 
 ```
+# obvykle nic — dashboard nastartuje sam pri startu session (SessionStart hook)
 /claude-monitor:start          # → http://127.0.0.1:8787/
 python3 tools/claude_monitor.py --port 8787 --open
 ```
+
+## Autostart
+
+`SessionStart` hook při každém startu session zkontroluje port 8787. Když tam nikdo
+neposlouchá, spustí dashboard **odpojeně** (přežije konec session), a tak či tak pošle
+jeho URL do kontextu session — takže se ho stačí zeptat, kde běží.
+
+| Proměnná | Efekt |
+|---|---|
+| `CLAUDE_MONITOR_PORT=8788` | jiný port (hook i server) |
+| `CLAUDE_MONITOR_AUTOSTART=0` | hook skončí tiše a nic nespustí |
+
+Server je **singleton na stroj**, ne na session: druhá session ho už jen najde. Když dvě
+odstartují naráz, druhý proces spadne na obsazený port a přežije jeden — do kontextu jde
+v obou případech tatáž URL. Ukončíš ho `kill $(lsof -ti:8787)`; sám se neukončí.
 
 ## Co ukazuje
 
@@ -25,6 +41,7 @@ python3 tools/claude_monitor.py --port 8787 --open
 | strom subagentů | `<sessionId>/subagents/agent-*.meta.json` |
 | git branch | `git -C <cwd> branch --show-current` (živě — v transcriptu bývá zastaralý) |
 | usage cockpit | `~/.claude.json` → `cachedUsageUtilization` (cache, kterou plní `/usage`) |
+| autostart + URL do session | `hooks/session-start.sh` (SessionStart hook) |
 
 Transcripty se čtou inkrementálně (pamatuje si offset), takže refresh je konstantně levný
 i u vícemegabajtových souborů.
