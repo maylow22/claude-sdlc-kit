@@ -11,14 +11,18 @@ Pokud argument chybí, **zeptej se** uživatele co implementovat — nepokračuj
 
 - **Hlavní kontext (ty)** — zadání, plán, implementace, E2E testy, opravy nálezů,
   konzultace, commit a PR. Tohle všechno drží jednu nit a ty u toho zůstáváš.
-- **Izolované subagenty (kroky 3, 6, 7 a 9)** — review plánu, úklid, review kódu, bezpečnost
-  a dokumentace. Každý dostane **čistý kontext**: zadání a plán, respektive branch a diff,
-  nic víc. Nevědí, jak jsi se k řešení dopracoval, co jsi zvažoval ani co jsi po cestě
-  zahodil — proto jejich nález něco znamená.
+- **Izolované subagenty (kroky 3, 6, 7, 9 a 10)** — review plánu, úklid, review kódu,
+  dokumentace a nakonec bezpečnost. Každý dostane **čistý kontext** a v něm nejvýš zadání,
+  plán a branch — nikdy průběh vývoje. Nevědí, jak jsi se k řešení dopracoval, co jsi
+  zvažoval ani co jsi po cestě zahodil, proto jejich nález něco znamená. Diff si každý
+  vytáhne sám.
+- `feature:linter` a `feature:security-reviewer` dostanou **jen branch**: úklid zadání
+  nepotřebuje a security review se nemá čím nechat přesvědčit, že díra je vlastně záměr.
 - Do promptu subagentům **nepiš** vysvětlení, obhajoby ani "tohle už jsme řešili".
   Kdo kód hodnotí, nesmí znát autorovu argumentaci.
 - Subagenti sami **necommitují** a reviewery **neopravují kód** — nálezy triáduješ a opravuješ
-  ty v kroku 8. Dokumentaci píše doc-writer, protože to je samostatná práce, ne oprava.
+  ty v krocích 8 a 10. Dokumentaci píše doc-writer, protože to je samostatná práce, ne oprava.
+- **Bezpečnost jde jako poslední**, až po dokumentaci — aby v diffu viděla i docs.
 - Mechanický úklid (formatter, lint, typecheck) je taky subagent — jeho výstup bývá
   nejdelší a nejméně zajímavý z celého workflow, tak ať nesedí v hlavním kontextu.
 
@@ -68,33 +72,27 @@ Pokud argument chybí, **zeptej se** uživatele co implementovat — nepokračuj
   potřeba znát záměr. Pak pusť linter znovu, nebo si sám ověř `npm run lint` a `npm run tsc`.
 - Krok **skipni**, pokud projekt nemá ani formatter, ani linter, ani typecheck.
 
-### 7. Review + bezpečnost — izolované subagenty
-Reviewery pouštěj až na uklizený kód, ať nálezy nejsou o formátování.
+### 7. Review kódu — izolovaný subagent
+Reviewera pouštěj až na uklizený kód, ať nálezy nejsou o formátování.
 
-**V jedné zprávě** spusť oba agenty paralelně, ať běží nezávisle na sobě:
-- `feature:reviewer` — correctness + simplify optika
-- `feature:security-reviewer` — bezpečnost; **skipni ho**, pokud se diff nedotýká
-  security plochy (vstupy od uživatele, auth, práva, API odpovědi, tajemství, závislosti,
-  práce se soubory) — jen napiš uživateli proč
-
-Prompt pro oba obsahuje **jen** tohle a nic dalšího:
+Spusť `feature:reviewer` (correctness + simplify optika). Prompt obsahuje **jen** tohle:
 - `baseBranch` (`develop`) a `branch`
-- **zadání** — tak, jak bylo potvrzené v kroku 1 (u reviewera navíc odsouhlasený plán z kroku 3)
-- pokyn, že diff si vytáhnou sami: `git diff <baseBranch>...HEAD`
+- **zadání** potvrzené v kroku 1 a **odsouhlasený plán** z kroku 3
+- pokyn, že diff si vytáhne sám: `git diff <baseBranch>...HEAD`
 
 Do promptu **nepatří**: co jsi zkoušel a zahodil, proč jsi něco udělal takhle, co už
-uživatel odsouhlasil, ani tvoje shrnutí implementace. Kdyby to znali, jen ti to potvrdí.
+uživatel odsouhlasil, ani tvoje shrnutí implementace. Kdyby to znal, jen ti to potvrdí.
+
+Bezpečnost tady **neřeš** — ta jde až v kroku 10, aby viděla i dokumentaci.
 
 ### 8. Opravy nálezů (hlavní kontext)
-- Nálezy z obou agentů projdi a **roztřiď**: co opravíš, co je falešný poplach (napiš proč),
-  co je mimo zadání (patří do ticketu, ne do téhle branche).
-- Oprav `blocker` a `major` / `critical` a `high` nálezy. `minor` a `low` podle úsudku.
+- Nálezy **roztřiď**: co opravíš, co je falešný poplach (napiš proč), co je mimo zadání
+  (patří do ticketu, ne do téhle branche).
+- Oprav `blocker` a `major`. `minor` podle úsudku.
 - Po opravách znovu `npm run test:e2e` (pokud krok 5 nebyl skipnutý). Lint a typecheck si
   ověř sám; když se toho nasypalo hodně, pusť radši znovu `feature:linter`.
-- Pokud se opravy dotkly security plochy, pusť `feature:security-reviewer` **znovu**
-  s čistým kontextem — hodnotí až výsledný diff.
 - Když reviewer vrátil `CHANGES` a ty s podstatnou částí nesouhlasíš, nehádej se s ním
-  v dalším kole — vezmi to do kroku 10 jako otázku pro uživatele.
+  v dalším kole — vezmi to do kroku 12 jako otázku pro uživatele.
 
 ### 9. Dokumentace — izolovaný subagent
 - Spusť `feature:doc-writer` (`baseBranch`, `branch`, zadání). Vidí hotový kód, ne cestu k němu.
@@ -102,19 +100,37 @@ uživatel odsouhlasil, ani tvoje shrnutí implementace. Kdyby to znali, jen ti t
 - **Skipni ho**, pokud jde o triviální změnu (překlep, copy, styl, čistě interní refaktoring
   beze změny chování) — jen napiš uživateli proč.
 - Doc-writer si sám vyhodnotí wiki (`/feature:wiki`), CHANGELOG i `docs/**`. Jeho report
-  ukaž uživateli v kroku 10 — nepřepisuj ho po něm.
+  ukaž uživateli v kroku 12 — nepřepisuj ho po něm.
 
-### 10. Konzultace
+### 10. Bezpečnost — izolovaný subagent, úplně na konci
+Až tady, protože teď je diff **kompletní včetně dokumentace** — a docs jsou plnohodnotná
+security plocha: příklady s tokenem, ENV hodnoty, interní URL, instrukce, podle které si
+čtenář vypne kontrolu nebo si commitne `.env`.
+
+- Spusť `feature:security-reviewer` — předej **jen** `baseBranch` a `branch`. Zadání ne:
+  je to solo kontrola, která nemá řešit, co feature měla dělat, a diff si vytáhne sama,
+  takže vidí kód po opravách i to, co zapsal doc-writer.
+- **Skipni ho** jen když se security plochy nedotýká **ani kód, ani dokumentace** — jen
+  napiš uživateli proč.
+- Nálezy oprav v hlavním kontextu, stejnou triáží jako v kroku 8: `critical` a `high` vždy,
+  `medium` a `low` podle úsudku.
+- Když se oprava dotkla dokumentace, pusť **znovu `feature:doc-writer`**, ne ruční záplatu —
+  docs má na starosti on.
+- Když jsi na security nálezy sahal do kódu podstatně, pusť `feature:security-reviewer`
+  **ještě raz** s čistým kontextem. Hodnotí se výsledný diff, ne ten, který mu přišel poprvé.
+
+### 11. Konzultace
 - Shrň uživateli:
   - co bylo implementováno (stručně, bez výpisu souborů)
   - nové/upravené testy
-  - výsledek review a bezpečnosti: verdikty + co jsi z nálezů opravil a co ne (a proč)
+  - výsledky review a bezpečnosti: oba verdikty + co jsi z nálezů opravil a co ne (a proč)
   - co zapsal doc-writer
   - co jsi nedělal a proč (pokud to stojí za zmínku)
-- **Počkej** na zpětnou vazbu. Pokud má uživatel připomínky, oprav je a vrať se na krok 6 (úklid) —
+- **Počkej** na zpětnou vazbu. Pokud má uživatel připomínky, oprav je a vrať se na krok 6
+  (úklid) a projdi kontrolní kroky znovu, včetně bezpečnosti —
   reviewery pouštěj vždy **znovu s čistým kontextem**, ne pokračováním předchozího agenta.
 
-### 11. Commit & PR
+### 12. Commit & PR
 - **Necommituj sám.** Připomeň uživateli command `/feature:commit` (vytvoří českou commit message bez emoji a bez Co-Authored-By).
 - Po commitu se zeptej jestli pushnout branch. Pokud ano:
   - `git push -u origin <branch>`
