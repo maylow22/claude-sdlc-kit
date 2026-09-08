@@ -2,7 +2,7 @@
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "feature",
   "version": "0.1.0",
-  "description": "Workflow pro vývoj feature — vývoj a E2E v hlavním kontextu, lint/review/bezpečnost/docs v izolovaných subagentech.",
+  "description": "Workflow pro vývoj feature — vývoj a E2E v hlavním kontextu, review plánu i kódu, lint, bezpečnost a docs v izolovaných subagentech.",
   "author": {
     "name": "Miloslav Marel",
     "email": "miloslav.marel@gem.cz"

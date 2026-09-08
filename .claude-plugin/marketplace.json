@@ -16,7 +16,7 @@
     },
     {
       "name": "feature",
-      "description": "Workflow pro vývoj feature — vývoj a E2E v hlavním kontextu, lint/review/bezpečnost/docs v izolovaných subagentech.",
+      "description": "Workflow pro vývoj feature — vývoj a E2E v hlavním kontextu, review plánu i kódu, lint, bezpečnost a docs v izolovaných subagentech.",
       "author": { "name": "Miloslav Marel" },
       "category": "workflow",
       "source": "./plugins/feature"

@@ -20,7 +20,7 @@ Restart Claude Code (nebo `/reload-plugins`) a pak `/claude-monitor:start`, `/fe
 | Plugin | Co dělá |
 |---|---|
 | [claude-monitor](plugins/claude-monitor) | Live dashboard všech sessions — stav, tokeny, kontext, subagenti, průběh workflow |
-| [feature](plugins/feature) | `/feature:start` workflow — vývoj a E2E v hlavním kontextu, lint/review/bezpečnost/docs v izolovaných subagentech; plus `/feature:commit`, `/feature:wiki` |
+| [feature](plugins/feature) | `/feature:start` workflow — vývoj a E2E v hlavním kontextu, review plánu i kódu, lint, bezpečnost a docs v izolovaných subagentech; plus `/feature:plan-review`, `/feature:commit`, `/feature:wiki` |
 
 ## Vývoj
 

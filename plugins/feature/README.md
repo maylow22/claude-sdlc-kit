@@ -7,6 +7,7 @@ v [claude-monitoru](../claude-monitor).
 | Command | Co dělá |
 |---|---|
 | `/feature:start <Jira klíč \| URL \| popis>` | celý průběh: zadání → branch → plán → implementace → E2E → lint → review → opravy → docs → konzultace → commit & PR |
+| `/feature:plan-review [cesta k plánu]` | adversariální review plánu proti skutečnému kódu, než se začne psát |
 | `/feature:commit` | git commit s českou hláškou, bez emoji a bez Co-Authored-By |
 | `/feature:wiki` | regenerace `docs/wiki/` (Karpathy-style LLM wiki) |
 
@@ -19,7 +20,10 @@ Jádro workflow drží **hlavní agent**, protože potřebuje jednu nit od zadá
 
 | Krok | Kde běží |
 |---|---|
-| 1 Zadání · 2 Branch · 3 Plán · 4 Implementace · 5 E2E | hlavní kontext |
+| 1 Zadání · 2 Branch | hlavní kontext |
+| 3 Plán — sestavení a zapracování nálezů | hlavní kontext |
+| 3 Plán — review | `feature:plan-reviewer` (čistý kontext) |
+| 4 Implementace · 5 E2E | hlavní kontext |
 | 6 Lint & formát | `feature:linter` (čistý kontext) |
 | 7 Review + bezpečnost | `feature:reviewer` + `feature:security-reviewer` (paralelně, čistý kontext) |
 | 8 Opravy nálezů | hlavní kontext |
@@ -42,6 +46,7 @@ pokračování — jinak by si kontext natáhli zpátky.
 
 | Agent | Kontext | Nástroje | Výstup |
 |---|---|---|---|
+| `feature:plan-reviewer` | zadání, plán | read-only | verdikt + nálezy Blocking/Should-fix proti reálnému kódu |
 | `feature:linter` | jen branch + diff | + Edit | co formatter/lint/tsc opravily a co zbylo autorovi |
 | `feature:reviewer` | zadání, plán, diff | read-only + Skill | verdikt PASS/CHANGES + nálezy dle závažnosti |
 | `feature:security-reviewer` | zadání, diff | read-only + Skill | verdikt + nálezy s cestou ke zneužití |
@@ -49,7 +54,7 @@ pokračování — jinak by si kontext natáhli zpátky.
 
 ## Brány, na kterých se čeká na tebe
 
-Zadání, plán, konzultace, commit & push. Bez výslovného souhlasu workflow necommituje,
+Zadání, **zreviewovaný** plán, konzultace, commit & push. Bez výslovného souhlasu workflow necommituje,
 nepushuje ani nevytváří PR (PR se jen vygeneruje jako odkaz — `gh` se nepoužívá).
 
 ## Konvence napevno

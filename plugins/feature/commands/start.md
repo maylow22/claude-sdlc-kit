@@ -1,5 +1,5 @@
 ---
-description: Spustí workflow pro novou feature — branch, plán, implementace a E2E v hlavním kontextu, review/bezpečnost/dokumentace v izolovaných subagentech
+description: Spustí workflow pro novou feature — branch, plán, implementace a E2E v hlavním kontextu, review plánu/lint/review kódu/bezpečnost/dokumentace v izolovaných subagentech
 argument-hint: <Jira klíč | Jira URL | popis úkolu>
 ---
 
@@ -11,9 +11,10 @@ Pokud argument chybí, **zeptej se** uživatele co implementovat — nepokračuj
 
 - **Hlavní kontext (ty)** — zadání, plán, implementace, E2E testy, opravy nálezů,
   konzultace, commit a PR. Tohle všechno drží jednu nit a ty u toho zůstáváš.
-- **Izolované subagenty (kroky 6, 7 a 9)** — úklid, review, bezpečnost a dokumentace. Každý dostane
-  **čistý kontext**: zadání, branch a diff, nic víc. Nevědí, jak jsi se ke kódu dopracoval,
-  co jsi zvažoval ani co jsi po cestě zahodil — proto jejich nález něco znamená.
+- **Izolované subagenty (kroky 3, 6, 7 a 9)** — review plánu, úklid, review kódu, bezpečnost
+  a dokumentace. Každý dostane **čistý kontext**: zadání a plán, respektive branch a diff,
+  nic víc. Nevědí, jak jsi se k řešení dopracoval, co jsi zvažoval ani co jsi po cestě
+  zahodil — proto jejich nález něco znamená.
 - Do promptu subagentům **nepiš** vysvětlení, obhajoby ani "tohle už jsme řešili".
   Kdo kód hodnotí, nesmí znát autorovu argumentaci.
 - Subagenti sami **necommitují** a reviewery **neopravují kód** — nálezy triáduješ a opravuješ
@@ -33,10 +34,19 @@ Pokud argument chybí, **zeptej se** uživatele co implementovat — nepokračuj
 - Přepni se na `develop` a stáhni si nejnovější stav (`git fetch origin && git checkout develop && git pull --ff-only`).
 - Vytvoř branch `feature/<KEY>-<slug>` (např. `feature/IF-9-rozbalit-informace`). Slug je krátký, lowercase, pomlčky místo mezer, bez diakritiky. Pokud Jira klíč chybí, použij jen `feature/<slug>`.
 
-### 3. Plán
-- Vždy nejdřív předlož **plán implementace** — stručné kroky (co/kde/jak), případně klíčové soubory a rizika.
-- **Počkej na výslovné odsouhlasení** uživatelem. Bez souhlasu nepokračuj na implementaci.
-- Pokud uživatel chce úpravy, plán uprav a znovu si nech odsouhlasit.
+### 3. Plán (a jeho review, než ho uvidí uživatel)
+- Sestav **plán implementace** — stručné kroky (co/kde/jak), klíčové soubory, rizika.
+  Zapiš ho do `.claude/plans/<branch-slug>.md`, ať má review i uživatel co číst.
+- **Nech ho zreviewovat, než ho předložíš:** `/feature:plan-review .claude/plans/<slug>.md`,
+  tedy agent `feature:plan-reviewer` s čistým kontextem. Ověří plán proti skutečnému kódu —
+  že jmenované soubory a symboly existují, že pořadí kroků drží, že se nevynalézá znovu,
+  co v repu je, a že plán pokrývá zadání a nic navíc.
+- Blokující nálezy **zapracuj do plánu**, should-fix podle úsudku (co ne, s důvodem).
+- Uživateli předlož **až zreviewovaný plán** + tři řádky o tom, co review našlo a co se
+  v plánu proto změnilo. Neschvaluje se první nástřel.
+- **Počkej na výslovné odsouhlasení.** Bez souhlasu nepokračuj na implementaci.
+- Pokud uživatel chce úpravy, plán uprav; při podstatné změně pusť review **znovu**
+  (nový agent, ne pokračování toho starého).
 
 ### 4. Implementace
 - Implementuj minimální změnu řešící zadání podle odsouhlaseného plánu. Žádné neporadené refaktoringy ani spekulativní abstrakce.
