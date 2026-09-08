@@ -247,6 +247,26 @@ def read_usage() -> dict | None:
     return _usage["data"]
 
 
+def code_version() -> str:
+    """vYYYYMMDD-commit of the checkout this script runs from - the date is the
+    commit's, not today's, so the same code always reports the same version. The
+    plugin can be installed outside git, then only the file date is known."""
+    here = Path(__file__).resolve()
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(here.parent), "log", "-1",
+             "--format=v%cd-%h", "--date=format:%Y%m%d"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return time.strftime("v%Y%m%d", time.localtime(here.stat().st_mtime))
+
+
 def git_branch(cwd: str, cache: dict[str, str | None]) -> str | None:
     """Live branch of the working directory. A branch belongs to the worktree, not
     the session - the one recorded in the transcript is stale for idle sessions."""
@@ -323,7 +343,11 @@ def build_state() -> dict:
         "busy": sum(1 for s in sessions if s["status"] == "busy"),
         "subagents": sum(len(s["subagents"]) for s in sessions),
         "output": sum(s["tokens"]["output"] for s in sessions),
+        "input": sum(s["tokens"]["input"] for s in sessions),
         "cache_read": sum(s["tokens"]["cache_read"] for s in sessions),
+        "cache_write": sum(s["tokens"]["cache_write"] for s in sessions),
+        "thinking": sum(s["tokens"]["thinking"] for s in sessions),
+        "turns": sum(s["turns"] for s in sessions),
         "context": sum(s["context"] for s in sessions),
     }
     return {
@@ -397,7 +421,10 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .sa-name{font-weight:550;white-space:nowrap}
 .sa-desc{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .sa-tok{color:var(--dim);font-variant-numeric:tabular-nums;flex:none}
+.ver{position:absolute;top:18px;right:18px;color:var(--dim);font-size:11px;
+     font-variant-numeric:tabular-nums}
 </style>
+<div class="ver">__VERSION__</div>
 <h1>Claude agents dashboard</h1>
 <div class="sub" id="sub">loading…</div>
 <div class="cockpit" id="cockpit"></div>
@@ -411,6 +438,12 @@ const ago = (t, now) => dur(Math.max(0, now - t));
 const esc = s => (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 
 function kpi(v, l){ return `<div class="kpi"><b>${v}</b><span>${l}</span></div>`; }
+
+// share of the input side served from the cache - what keeps a long session cheap
+function hit(T){
+  const all = T.cache_read + T.cache_write + T.input;
+  return all ? Math.round(100 * T.cache_read / all) + "%" : "–";
+}
 
 function cockpit(u, now){
   if(!u) return "";
@@ -474,8 +507,12 @@ async function tick(){
       kpi(T.sessions, "sessions") + kpi(T.busy, "busy")
       + `<div class="kpi${T.waiting ? " att" : ""}"><b>${T.waiting}</b>`
       + `<span>need you</span></div>`
-      + kpi(T.subagents, "subagents") + kpi(n(T.context), "context total")
-      + kpi(n(T.output), "output tokens") + kpi(n(T.cache_read), "cache read");
+      + kpi(T.subagents, "subagents") + kpi(T.turns, "turns")
+      + kpi(n(T.context), "context total")
+      + kpi(n(T.output), "output tokens") + kpi(n(T.input), "input tokens")
+      + kpi(n(T.thinking), "thinking")
+      + kpi(n(T.cache_read), "cache read") + kpi(n(T.cache_write), "cache write")
+      + kpi(hit(T), "cache hit");
     document.getElementById("grid").innerHTML = d.sessions.map(s => card(s, now)).join("");
     document.title = (T.waiting ? `(${T.waiting}) ` : "") + "Claude agents";
   } catch (e) {
@@ -485,6 +522,7 @@ async function tick(){
 tick(); setInterval(tick, 3000);
 </script>
 """
+PAGE = PAGE.replace("__VERSION__", code_version())
 
 
 class Handler(BaseHTTPRequestHandler):

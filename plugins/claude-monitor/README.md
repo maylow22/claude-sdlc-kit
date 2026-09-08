@@ -7,6 +7,7 @@ A live dashboard of every Claude Code session running on the machine. Zero-depen
 # usually nothing — the dashboard starts itself at session start (SessionStart hook)
 /claude-monitor:start          # → http://127.0.0.1:8787/
 python3 tools/claude_monitor.py --port 8787 --open
+tools/restart.sh [port]        # kill the running instance and start a fresh one
 ```
 
 ## Who is waiting on you
@@ -29,19 +30,30 @@ is what ages the record out.
 
 ## Autostart
 
-The `SessionStart` hook checks port 8787 on every session start. If nobody is listening it
-starts the dashboard **detached** (surviving the end of the session), and either way it pushes
-the URL into the session context — so you can just ask the session where it is running.
+The `SessionStart` hook **restarts** the dashboard on every session start — so a new session
+always runs the current code — and pushes its URL into the session context, so you can just ask
+the session where it is running. The new instance is **detached** and survives the end of the
+session. The whole hook takes ~0.3 s.
 
 | Variable | Effect |
 |---|---|
 | `CLAUDE_MONITOR_PORT=8788` | a different port (hook and server alike) |
 | `CLAUDE_MONITOR_AUTOSTART=0` | the hook exits quietly and starts nothing |
 
-The server is a **singleton per machine**, not per session: a second session merely finds it.
-When two start at once, the second process dies on the taken port and one survives — either way
-the same URL goes into the context. You stop it with `kill $(lsof -ti:8787)`; it will not stop
-on its own.
+The server is a **singleton per machine**, not per session — so a session start replaces the
+instance the *other* sessions are watching. That costs them nothing visible: it is back in well
+under a second and the browser polls every 3 s. What is lost are the in-memory transcript
+offsets, so the first refresh after a restart re-reads every transcript from the beginning
+(the totals come out the same, it is just not the cheap incremental read).
+
+Restarting is safe under concurrency: the kill always precedes the start, so when several
+sessions start at once exactly one server survives, and each hook verifies the **port** rather
+than its own pid — nobody reports an untruth. `tools/restart.sh` refuses to kill a process on
+the port that is not `claude_monitor.py`; the hook then reports that the dashboard is not
+running instead of stealing somebody else's port.
+
+You stop it with `kill $(lsof -ti:8787)`; it will not stop on its own — but the next session
+start brings it back.
 
 ## What it shows
 
@@ -49,6 +61,11 @@ on its own.
   percentages and a countdown to the reset; the active limit is highlighted
 - **status** — needs you / busy / idle, pid, kind (interactive/background), project, live git branch
 - **tokens** — output, input, cache read/write, thinking; context window occupancy
+- **KPI row** — sessions, busy, need you, subagents, turns, context total, and the token
+  aggregates across all sessions, ending with **cache hit** (the share of the input side
+  served from the cache — what keeps a long session cheap)
+- **version** — `vYYYYMMDD-commit` in the top right corner; the date is the **commit's**, so
+  the same code always reports the same version (outside a git checkout only the file date)
 - **subagent tree** — agentType, description, output tokens, how long ago it was active
 
 ## Data sources
@@ -60,7 +77,7 @@ on its own.
 | subagent tree | `<sessionId>/subagents/agent-*.meta.json` |
 | git branch | `git -C <cwd> branch --show-current` (live — the transcript's copy tends to be stale) |
 | usage cockpit | `~/.claude.json` → `cachedUsageUtilization` (the cache `/usage` fills) |
-| autostart + URL into the session | `hooks/session-start.sh` (SessionStart hook) |
+| restart + URL into the session | `hooks/session-start.sh` → `tools/restart.sh` (SessionStart hook) |
 | the reason for waiting on the user | `hooks/notification.py` → `~/.claude/monitor/notify/<sessionId>.json` |
 
 Transcripts are read incrementally (the offset is remembered), so a refresh costs the same
