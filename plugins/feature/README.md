@@ -9,7 +9,7 @@ v [claude-monitoru](../claude-monitor).
 | `/feature:start <Jira klíč \| URL \| popis>` | celý průběh: zadání → branch → plán → implementace → E2E → lint → review → opravy → docs → konzultace → commit & PR |
 | `/feature:plan-review [cesta k plánu]` | adversariální review plánu proti skutečnému kódu, než se začne psát |
 | `/feature:commit` | git commit s českou hláškou, bez emoji a bez Co-Authored-By |
-| `/feature:wiki` | regenerace `docs/wiki/` (Karpathy-style LLM wiki) |
+| `/feature:wiki [--scope=full\|incremental]` | wiki projektu v `docs/wiki/` podle LLM-wiki vzoru — stack si zjistí sám |
 
 `/feature:start` si `/feature:commit` i `/feature:wiki` volá sám (wiki přes doc-writera);
 samostatně je pustíš, když workflow neběží.
@@ -42,6 +42,11 @@ kód zná. Doc-writer psát smí (dokumentace je práce, ne oprava), ale necommi
 Při dalším kole (uživatel má připomínky) se agenti spouštějí **znovu od nuly**, ne jako
 pokračování — jinak by si kontext natáhli zpátky.
 
+Command nese **recept**, agent je **hranice kontextu** — nejsou to konkurenční varianty.
+`/feature:wiki` je proto command: člověk si ho pustí přímo (a běží v jeho kontextu), z workflow
+ho volá `feature:doc-writer`, takže tam ta práce padne do jeho okna. Proto má doc-writer
+`Agent` — aby mu fáze B rozjela discovery subagenty.
+
 ## Agenti
 
 | Agent | Kontext | Nástroje | Výstup |
@@ -59,6 +64,12 @@ nepushuje ani nevytváří PR (PR se jen vygeneruje jako odkaz — `gh` se nepou
 
 ## Konvence napevno
 
-Commandy počítají s autorovým setupem: branch z `develop`, `npm run test:e2e` / `tsc` /
-`lint`, Jira na `addsign.atlassian.net`. `/feature:wiki` je navíc psaná pro strukturu
-projektu moje-agenda (`src/components/taskForms/**`) — v jiném projektu ji ber jako šablonu.
+Workflow počítá s autorovým setupem: branch z `develop`, `npm run test:e2e` / `tsc` /
+`lint`, Jira na `addsign.atlassian.net`.
+
+`/feature:wiki` je naopak **stackově neutrální** — jazyk, build, testy i tvar repa si zjistí
+z manifestů a `git ls-files`, sadu stránek určí podle toho, co v projektu opravdu je, a stránku
+bez obsahu nezakládá. Drží tři vrstvy LLM-wiki vzoru: kód je raw zdroj (nikdy do něj nezapisuje),
+`docs/wiki/**` vlastní, `CLAUDE.md`/`AGENTS.md`/`README.md` je schéma, kterým se řídí.
+`index.md` je katalog, `log.md` append-only historie, a `--scope=incremental` přepíše jen
+stránky dotčené diffem od posledního záznamu v logu.
