@@ -1,7 +1,8 @@
 # claude-monitor
 
 A live dashboard of every Claude Code session running on the machine. Zero-dependency Python
-(stdlib), serving a standalone HTML page that auto-refreshes every 3 s.
+(stdlib), serving a standalone HTML page that auto-refreshes every 3 s — click the interval in
+the header to cycle it: 3 s → 10 s → 1 min → stop (a real stop, no timer at all).
 
 ```
 # usually nothing — the dashboard starts itself at session start (SessionStart hook)
@@ -57,13 +58,15 @@ start brings it back.
 
 ## What it shows
 
-- **usage cockpit** — plan utilization (5 h session, weekly limit, weekly model limit) with
-  percentages and a countdown to the reset; the active limit is highlighted
+- **one KPI row** — it opens with plan utilization (5 h session, weekly, weekly model) as
+  percent tiles with a thin bar, the active limit framed; the long label, the countdown to the
+  reset and the age of the usage cache are in the tooltip. Then the counts and the few token numbers that matter; the
+  rest is folded behind **show more**
 - **status** — needs you / busy / idle, pid, kind (interactive/background), project, live git branch
 - **tokens** — output, input, cache read/write, thinking; context window occupancy
-- **KPI row** — sessions, busy, need you, subagents, turns, context total, and the token
-  aggregates across all sessions, ending with **cache hit** (the share of the input side
-  served from the cache — what keeps a long session cheap)
+- **folded away** — subagents, turns, input tokens, thinking, cache read/write, plan tier.
+  Always visible instead: sessions, busy, need you, context total, output tokens and **cache
+  hit** (the share of the input side served from the cache — what keeps a long session cheap)
 - **version** — `vYYYYMMDD-commit` in the top right corner; the date is the **commit's**, so
   the same code always reports the same version (outside a git checkout only the file date)
 - **subagent tree** — agentType, description, output tokens, how long ago it was active
@@ -76,7 +79,7 @@ start brings it back.
 | tokens, model, effort | `~/.claude/projects/<slug>/<sessionId>.jsonl` → `.message.usage` |
 | subagent tree | `<sessionId>/subagents/agent-*.meta.json` |
 | git branch | `git -C <cwd> branch --show-current` (live — the transcript's copy tends to be stale) |
-| usage cockpit | `~/.claude.json` → `cachedUsageUtilization` (the cache `/usage` fills) |
+| plan usage tiles | `~/.claude.json` → `cachedUsageUtilization` (the cache `/usage` fills) |
 | restart + URL into the session | `hooks/session-start.sh` → `tools/restart.sh` (SessionStart hook) |
 | the reason for waiting on the user | `hooks/notification.py` → `~/.claude/monitor/notify/<sessionId>.json` |
 
@@ -89,7 +92,7 @@ whether the file is small or several megabytes.
   1M tier from the log. The context limits therefore live in `CONTEXT_LIMITS` at the top of the
   script (Claude 5 family 1M, Haiku 4.5 200K); Claude Code may auto-compact earlier.
 - Usage is **not fetched from the API** — it reads the cache Claude Code writes itself. The age
-  of the cache is printed in the header; `/usage` in any session refreshes it.
+  of the cache is in the tooltip of the plan tiles; `/usage` in any session refreshes it.
 - A `Notification` hook record is only invalidated by a write to the transcript. After you
   approve a permission, though, nothing is written to the transcript until the tool finishes —
   so for a long command "waiting for tool permission" can hang around for a while after you

@@ -50,6 +50,8 @@ DEFAULT_LIMIT = 1_000_000
 # Fields from ~/.claude.json -> cachedUsageUtilization.utilization.limits
 LIMIT_LABELS = {"session": "session (5 h)", "weekly_all": "week, all models",
                 "weekly_scoped": "week"}
+# the KPI tile is narrow - the long label only survives in the tooltip
+SHORT_LABELS = {"session": "5 h", "weekly_all": "week all", "weekly_scoped": "week"}
 
 _cache: dict[str, dict] = {}
 _usage: dict = {"mtime": 0.0, "data": None}
@@ -70,7 +72,23 @@ def _fresh() -> dict:
         "effort": None,
         "branch": None,
         "last_ts": None,
+        "last_agent": None,
     }
+
+
+AGENT_TEXT_MAX = 800
+
+
+def agent_text(content) -> str:
+    """Visible text of an assistant turn - thinking and tool_use blocks skipped."""
+    if not isinstance(content, list):
+        return ""
+    txt = "\n".join(
+        b.get("text", "")
+        for b in content
+        if isinstance(b, dict) and b.get("type") == "text"
+    ).strip()
+    return (txt[:AGENT_TEXT_MAX] + "\u2026") if len(txt) > AGENT_TEXT_MAX else txt
 
 
 def scan(path: str) -> dict:
@@ -110,6 +128,11 @@ def scan(path: str) -> dict:
         msg = e.get("message")
         if not isinstance(msg, dict):
             continue
+        if e.get("type") == "assistant" and not e.get("isSidechain"):
+            # Turns that only think or call tools keep the previous reply.
+            said = agent_text(msg.get("content"))
+            if said:
+                c["last_agent"] = {"text": said, "ts": e.get("timestamp")}
         u = msg.get("usage")
         if not isinstance(u, dict):
             continue
@@ -213,10 +236,12 @@ def _parse_usage() -> dict | None:
             continue
         kind = str(lim.get("kind") or "?")
         label = LIMIT_LABELS.get(kind, kind)
+        short = SHORT_LABELS.get(kind, kind)
         model = ((lim.get("scope") or {}).get("model") or {}).get("display_name")
         limits.append(
             {
                 "label": f"{label} {model}" if model else label,
+                "short": (f"{short} {model}" if model else short),
                 "percent": lim.get("percent") or 0,
                 "severity": lim.get("severity") or "normal",
                 "resetsAt": lim.get("resets_at"),
@@ -310,6 +335,9 @@ def build_state() -> dict:
             mtime = os.stat(path).st_mtime if path else 0
         except OSError:
             mtime = 0
+        att = attention(s, sid, mtime)
+        if att:  # only a waiting session shows what it last said
+            att["lastAgent"] = t["last_agent"]
         sessions.append(
             {
                 "name": s.get("name") or sid[:8],
@@ -317,7 +345,7 @@ def build_state() -> dict:
                 "pid": s.get("pid"),
                 "kind": s.get("kind"),
                 "status": s.get("status"),
-                "attention": attention(s, sid, mtime),
+                "attention": att,
                 "cwd": s.get("cwd", ""),
                 "project": os.path.basename(s.get("cwd", "")) or "?",
                 "startedAt": s.get("startedAt"),
@@ -369,17 +397,21 @@ body{margin:0;padding:18px;background:var(--bg);color:var(--fg);
      font:14px/1.45 ui-sans-serif,-apple-system,system-ui,sans-serif}
 h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .sub{color:var(--dim);font-size:12px;margin-bottom:16px}
+.iv{background:none;border:1px solid var(--line);border-radius:5px;color:var(--dim);
+    font:inherit;padding:0 6px;cursor:pointer;font-variant-numeric:tabular-nums}
+.iv:hover{border-color:var(--dim);color:var(--fg)}
 .kpis{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
-.cockpit{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
-.lim{background:var(--card);border:1px solid var(--line);border-radius:8px;
-     padding:8px 12px;flex:1 1 190px;min-width:170px}
-.lim.on{border-color:var(--busy)}
-.lim .t{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--dim)}
-.lim .t b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
-.lim .r{font-size:11px;color:var(--dim)}
-.lim.hot>.bar>i{background:var(--warn)}
-.lim.max>.bar>i{background:#f2776b}
+.kpi.plan{min-width:86px}
+.kpi.plan.on{border-color:var(--busy)}
+.kpi .bar{margin:6px 0 0}
+.kpi.hot .bar>i{background:var(--warn)}
+.kpi.max .bar>i{background:#f2776b}
 .kpi{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.kpis:not(.all) .kpi.more-only{display:none}
+.more{background:none;border:1px dashed var(--line);border-radius:8px;color:var(--dim);
+      padding:8px 12px;font:inherit;font-size:11px;text-transform:uppercase;
+      letter-spacing:.04em;cursor:pointer}
+.more:hover{border-color:var(--dim);color:var(--fg)}
 .kpi b{display:block;font-size:19px;font-variant-numeric:tabular-nums}
 .kpi span{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
 .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}
@@ -408,6 +440,11 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
          padding:6px 9px;margin:0 0 9px;font-size:12.5px;line-height:1.4}
 .att-row b{color:var(--att)}
 .att-row .d{color:var(--dim);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.att-row .say{margin-top:4px;color:var(--dim);cursor:pointer;overflow:hidden;
+              display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.att-row .say::before{content:"\25be ";color:var(--att)}
+.att-row .say.open{display:block;white-space:pre-wrap}
+.att-row .say.open::before{content:"\25b4 "}
 .kpi.att b{color:var(--att)}
 .meta{color:var(--dim);font-size:12px;margin-bottom:9px}
 .bar{height:5px;background:var(--bar2);border-radius:99px;overflow:hidden;margin:3px 0 5px}
@@ -427,7 +464,6 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 <div class="ver">__VERSION__</div>
 <h1>Claude agents dashboard</h1>
 <div class="sub" id="sub">loading…</div>
-<div class="cockpit" id="cockpit"></div>
 <div class="kpis" id="kpis"></div>
 <div class="grid" id="grid"></div>
 <script>
@@ -437,7 +473,38 @@ const dur = s => s < 60 ? Math.round(s)+" s" : s < 3600 ? Math.round(s/60)+" min
 const ago = (t, now) => dur(Math.max(0, now - t));
 const esc = s => (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 
-function kpi(v, l){ return `<div class="kpi"><b>${v}</b><span>${l}</span></div>`; }
+function kpi(v, l, c){ return `<div class="kpi ${c||""}"><b>${v}</b><span>${l}</span></div>`; }
+
+// click the interval in the sub line to cycle it; like the KPI fold, the state has to
+// live outside the DOM because the sub line is rewritten on every tick
+const INTERVALS = [[3000, "3 s"], [10000, "10 s"], [60000, "1 min"], [0, "stop"]];
+let ivIdx = 0, timer = null;
+function arm(){
+  clearInterval(timer);
+  const ms = INTERVALS[ivIdx][0];
+  if(ms) timer = setInterval(tick, ms);  // "stop" is 0 - no timer, not a very long one
+}
+function cycleRefresh(){
+  ivIdx = (ivIdx + 1) % INTERVALS.length;
+  arm();
+  // tick() repaints the label too, but only once its fetch resolves - a click has to
+  // answer immediately, so write it here as well
+  document.querySelector(".iv").textContent = INTERVALS[ivIdx][1];
+  tick();
+}
+
+// the KPI row is rebuilt every tick, so the fold state lives out here, not in the DOM
+let kpisAll = false;
+function toggleKpis(){
+  kpisAll = !kpisAll;
+  paintKpiFold();
+}
+function paintKpiFold(){
+  const el = document.getElementById("kpis");
+  el.classList.toggle("all", kpisAll);
+  const b = el.querySelector(".more");
+  if(b) b.textContent = kpisAll ? "show less" : "show more";
+}
 
 // share of the input side served from the cache - what keeps a long session cheap
 function hit(T){
@@ -445,20 +512,32 @@ function hit(T){
   return all ? Math.round(100 * T.cache_read / all) + "%" : "–";
 }
 
-function cockpit(u, now){
+// plan utilization as a KPI tile - the long label and the countdown are in the tooltip
+function planKpis(u, now){
   if(!u) return "";
   return u.limits.map(l => {
     const p = Math.max(0, Math.min(100, l.percent));
     const cls = (p >= 90 || l.severity === "critical") ? "max"
               : (p >= 70 || l.severity === "warning") ? "hot" : "";
     const reset = l.resetsAt
-      ? "resets in " + dur(Math.max(0, Date.parse(l.resetsAt)/1000 - now)) : "&nbsp;";
-    return `<div class="lim ${cls} ${l.active ? "on" : ""}">
-      <div class="t"><span>${esc(l.label)}</span><b>${l.percent} %</b></div>
-      <div class="bar"><i style="width:${p}%"></i></div>
-      <div class="r">${reset}</div></div>`;
+      ? " · resets in " + dur(Math.max(0, Date.parse(l.resetsAt)/1000 - now)) : "";
+    const age = " · from the Claude Code cache, " + ago(u.fetchedAt, now) + " old";
+    return `<div class="kpi plan ${cls}${l.active ? " on" : ""}"`
+      + ` title="${esc(l.label)}${reset}${age}">`
+      + `<b>${Math.round(p)} %</b><span>${esc(l.short)}</span>`
+      + `<div class="bar"><i style="width:${p}%"></i></div></div>`;
   }).join("");
 }
+
+// same reason as the KPI fold: the cards are rebuilt every tick
+const expanded = new Set();  // sessions whose last agent message is unfolded
+document.getElementById("grid").addEventListener("click", ev => {
+  const el = ev.target.closest(".say");
+  if(!el) return;
+  const sid = el.dataset.sid;
+  expanded.has(sid) ? expanded.delete(sid) : expanded.add(sid);
+  el.classList.toggle("open");
+});
 
 function card(s, now){
   const a = s.attention;
@@ -470,8 +549,12 @@ function card(s, now){
       <span class="sa-name">${esc(a.type)}</span>
       <span class="sa-desc">${esc(a.desc)}</span>
       <span class="sa-tok">${n(a.tokens.output)} out · ${ago(a.mtime, now)}</span></div>`).join("");
+  const said = a && a.lastAgent;
   const att = a ? `<div class="att-row">&#9203; <b>${esc(a.label)}</b> &middot; ${ago(a.since, now)}
-      ${a.detail ? `<span class="d">${esc(a.detail)}</span>` : ""}</div>` : "";
+      ${a.detail ? `<span class="d">${esc(a.detail)}</span>` : ""}
+      ${said ? `<div class="say${expanded.has(s.sessionId) ? " open" : ""}"
+        data-sid="${esc(s.sessionId)}" title="click to expand">${esc(said.text)}</div>` : ""
+      }</div>` : "";
   return `<div class="card ${st}">
     <div class="head"><h2>${esc(s.name)}</h2>
       <span class="pill ${st}">${st === "busy" ? '<i class="spin"></i>' : ""}${
@@ -498,28 +581,33 @@ async function tick(){
     const d = await (await fetch("/api/state")).json();
     const T = d.totals, now = d.now;
     const U = d.usage;
-    document.getElementById("sub").textContent =
-      "updated " + new Date().toLocaleTimeString() + " · auto-refresh 3 s"
-      + (U ? " · plan " + U.plan + " · usage from the Claude Code cache, "
-             + ago(U.fetchedAt, now) + " old" : "");
-    document.getElementById("cockpit").innerHTML = cockpit(U, now);
+    document.getElementById("sub").innerHTML =
+      "updated " + new Date().toLocaleTimeString() + " · auto-refresh "
+      + `<button class="iv" onclick="cycleRefresh()" title="click to change the interval">`
+      + INTERVALS[ivIdx][1] + `</button>`;
     document.getElementById("kpis").innerHTML =
-      kpi(T.sessions, "sessions") + kpi(T.busy, "busy")
+      planKpis(U, now)
+      + kpi(T.sessions, "sessions") + kpi(T.busy, "busy")
       + `<div class="kpi${T.waiting ? " att" : ""}"><b>${T.waiting}</b>`
       + `<span>need you</span></div>`
-      + kpi(T.subagents, "subagents") + kpi(T.turns, "turns")
       + kpi(n(T.context), "context total")
-      + kpi(n(T.output), "output tokens") + kpi(n(T.input), "input tokens")
-      + kpi(n(T.thinking), "thinking")
-      + kpi(n(T.cache_read), "cache read") + kpi(n(T.cache_write), "cache write")
-      + kpi(hit(T), "cache hit");
+      + kpi(n(T.output), "output tokens") + kpi(hit(T), "cache hit")
+      + kpi(T.subagents, "subagents", "more-only")
+      + kpi(T.turns, "turns", "more-only")
+      + kpi(n(T.input), "input tokens", "more-only")
+      + kpi(n(T.thinking), "thinking", "more-only")
+      + kpi(n(T.cache_read), "cache read", "more-only")
+      + kpi(n(T.cache_write), "cache write", "more-only")
+      + (U ? kpi(esc(U.plan), "plan", "more-only") : "")
+      + `<button class="more" onclick="toggleKpis()">show more</button>`;
+    paintKpiFold();
     document.getElementById("grid").innerHTML = d.sessions.map(s => card(s, now)).join("");
     document.title = (T.waiting ? `(${T.waiting}) ` : "") + "Claude agents";
   } catch (e) {
     document.getElementById("sub").textContent = "connection to the server failed: " + e;
   }
 }
-tick(); setInterval(tick, 3000);
+tick(); arm();
 </script>
 """
 PAGE = PAGE.replace("__VERSION__", code_version())

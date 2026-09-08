@@ -15,7 +15,9 @@ listening() {
 }
 
 # Only kill our own process - somebody else's server on the same port is not ours to stop.
-for pid in $(lsof -ti:"$PORT" 2>/dev/null); do
+# -sTCP:LISTEN matters: without it lsof also lists every *client* on the port, so an open
+# browser tab on the dashboard would look like a foreign process holding it.
+for pid in $(lsof -ti:"$PORT" -sTCP:LISTEN 2>/dev/null); do
   if ps -o command= -p "$pid" | grep -q claude_monitor.py; then
     echo "stopping monitor (pid $pid) on port ${PORT}"
     kill "$pid"
