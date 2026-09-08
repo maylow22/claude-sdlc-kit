@@ -1,5 +1,5 @@
 {
-  "description": "Pri startu session nastartuje dashboard, pokud jeste nejede, a posle jeho URL do kontextu.",
+  "description": "Pri startu session nastartuje dashboard a posle jeho URL do kontextu; Notification hooky hlasi dashboardu, ze session ceka na uzivatele.",
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +8,38 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
             "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/notification.py\" permission_prompt",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/notification.py\" idle_prompt",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "elicitation_dialog",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/notification.py\" elicitation_dialog",
+            "timeout": 5
           }
         ]
       }
