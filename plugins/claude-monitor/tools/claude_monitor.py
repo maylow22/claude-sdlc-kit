@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Live dashboard vsech Claude Code sessions na tomhle stroji.
+"""Live dashboard of every Claude Code session running on this machine.
 
-Data:
+Data sources:
   - `claude agents --json`           -> sessions, pid/cwd/kind/status/waitingFor
-  - ~/.claude/projects/*/<sid>.jsonl -> tokeny, model, effort, git branch, aktivita
-  - .../<sid>/subagents/agent-*      -> strom subagentu (agentType, spawnDepth, tokeny)
-  - ~/.claude/monitor/notify/*.json  -> Notification hook: session ceka na uzivatele
+  - ~/.claude/projects/*/<sid>.jsonl -> tokens, model, effort, git branch, activity
+  - .../<sid>/subagents/agent-*      -> subagent tree (agentType, spawnDepth, tokens)
+  - ~/.claude/monitor/notify/*.json  -> Notification hook: session is waiting on the user
 
-Spusteni:  python3 claude_monitor.py [--port 8787] [--open]
+Run:  python3 claude_monitor.py [--port 8787] [--open]
 """
 
 from __future__ import annotations
@@ -29,26 +29,27 @@ NOTIFY = Path.home() / ".claude" / "monitor" / "notify"
 SUBAGENT_ACTIVE_SEC = 60
 
 # `claude agents --json` -> waitingFor
-WAITING_LABELS = {"input needed": "ceka na tvuj vstup"}
-# Matchery Notification hooku (viz hooks/notification.py)
+WAITING_LABELS = {"input needed": "waiting for your input"}
+# Notification hook matchers (see hooks/notification.py)
 NOTIFY_LABELS = {
-    "permission_prompt": "ceka na povoleni nastroje",
-    "idle_prompt": "ceka na zadani",
-    "elicitation_dialog": "MCP dialog ceka na vstup",
+    "permission_prompt": "waiting for tool permission",
+    "idle_prompt": "waiting for a prompt",
+    "elicitation_dialog": "MCP dialog waiting for input",
 }
 
-# Velikosti kontextovych oken (zdroj: skill claude-api). Cela Claude 5 rodina
-# ma 1M, Haiku 4.5 jen 200K. Pozor: transcript v `message.model` NEUVADI sufix
-# [1m], takze rozlisit 1M tier z logu nejde - proto 1M jako default pro 5 rodinu.
-# Claude Code muze auto-compactovat driv (viz `claude --autocompact`).
+# Context window sizes (source: claude-api skill). The whole Claude 5 family is
+# 1M, Haiku 4.5 only 200K. Careful: the transcript's `message.model` does NOT carry
+# the [1m] suffix, so the 1M tier cannot be told apart from the log - hence 1M as
+# the default for the 5 family. Claude Code may auto-compact earlier (see
+# `claude --autocompact`).
 CONTEXT_LIMITS = {
     "claude-haiku-4-5": 200_000,
 }
 DEFAULT_LIMIT = 1_000_000
 
-# Kolonky z ~/.claude.json -> cachedUsageUtilization.utilization.limits
-LIMIT_LABELS = {"session": "session (5 h)", "weekly_all": "tyden celkem",
-                "weekly_scoped": "tyden"}
+# Fields from ~/.claude.json -> cachedUsageUtilization.utilization.limits
+LIMIT_LABELS = {"session": "session (5 h)", "weekly_all": "week, all models",
+                "weekly_scoped": "week"}
 
 _cache: dict[str, dict] = {}
 _usage: dict = {"mtime": 0.0, "data": None}
@@ -73,14 +74,14 @@ def _fresh() -> dict:
 
 
 def scan(path: str) -> dict:
-    """Precte jen nove radky od posledniho volani a zaktualizuje agregaty."""
+    """Read only the lines added since the last call and update the aggregates."""
     try:
         size = os.stat(path).st_size
     except OSError:
         return _fresh()
 
     c = _cache.get(path)
-    if c is None or size < c["offset"]:  # novy soubor nebo truncate
+    if c is None or size < c["offset"]:  # new file or truncation
         c = _cache[path] = _fresh()
     if size == c["offset"]:
         return c
@@ -121,15 +122,15 @@ def scan(path: str) -> dict:
         c["cache_write"] += cw
         c["thinking"] += (u.get("output_tokens_details") or {}).get("thinking_tokens", 0)
         c["turns"] += 1
-        c["context"] = inp + cr + cw  # posledni turn = aktualni obsazeni okna
+        c["context"] = inp + cr + cw  # last turn = current window occupancy
         if msg.get("model"):
             c["model"] = msg["model"]
     return c
 
 
 def read_notify(session_id: str, mtime: float) -> dict | None:
-    """Zaznam Notification hooku. Plati, dokud transcript nepokrocil za nej -
-    jakmile uzivatel odpovi, prijde do transcriptu zapis a zaznam je zastaraly."""
+    """Notification hook record. Valid until the transcript moves past it - once the
+    user answers, the transcript gets written to and the record goes stale."""
     try:
         rec = json.loads((NOTIFY / f"{session_id}.json").read_text())
     except (OSError, ValueError):
@@ -138,8 +139,9 @@ def read_notify(session_id: str, mtime: float) -> dict | None:
 
 
 def attention(session: dict, session_id: str, mtime: float) -> dict | None:
-    """Ceka session na uzivatele, a proc? Notification hook zna duvod presneji
-    (ktery nastroj chce povolit), status z CLI funguje i bez hooku."""
+    """Is the session waiting on the user, and why? The Notification hook knows the
+    reason more precisely (which tool wants permission); the CLI status works even
+    without the hook."""
     rec = read_notify(session_id, mtime)
     if rec:
         kind = rec.get("kind") or "?"
@@ -153,7 +155,7 @@ def attention(session: dict, session_id: str, mtime: float) -> dict | None:
         wf = session.get("waitingFor") or ""
         return {
             "kind": "waiting",
-            "label": WAITING_LABELS.get(wf, wf or "ceka na uzivatele"),
+            "label": WAITING_LABELS.get(wf, wf or "waiting for the user"),
             "detail": "",
             "since": mtime,
         }
@@ -232,9 +234,9 @@ def _parse_usage() -> dict | None:
 
 
 def read_usage() -> dict | None:
-    """Vyuziti planu (to, co ukazuje /usage). Claude Code si ho cachuje do
-    ~/.claude.json; vlastni dotaz na API nedelame, takze cislo je jen tak
-    cerstve, jak cerstva je cache - proto se posila i fetchedAt."""
+    """Plan utilization (what /usage shows). Claude Code caches it in ~/.claude.json;
+    we never query the API ourselves, so the number is only as fresh as the cache -
+    which is why fetchedAt travels with it."""
     try:
         mtime = os.stat(CONFIG).st_mtime
     except OSError:
@@ -246,8 +248,8 @@ def read_usage() -> dict | None:
 
 
 def git_branch(cwd: str, cache: dict[str, str | None]) -> str | None:
-    """Zivy branch pracovniho adresare. Branch je vlastnost worktree, ne session -
-    branch zapsany v transcriptu je u necinnych sessions zastaraly."""
+    """Live branch of the working directory. A branch belongs to the worktree, not
+    the session - the one recorded in the transcript is stale for idle sessions."""
     if cwd in cache:
         return cache[cwd]
     b = None
@@ -396,8 +398,8 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .sa-desc{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .sa-tok{color:var(--dim);font-variant-numeric:tabular-nums;flex:none}
 </style>
-<h1>Claude agents na tomhle Macu</h1>
-<div class="sub" id="sub">nacitam…</div>
+<h1>Claude agents dashboard</h1>
+<div class="sub" id="sub">loading…</div>
 <div class="cockpit" id="cockpit"></div>
 <div class="kpis" id="kpis"></div>
 <div class="grid" id="grid"></div>
@@ -417,7 +419,7 @@ function cockpit(u, now){
     const cls = (p >= 90 || l.severity === "critical") ? "max"
               : (p >= 70 || l.severity === "warning") ? "hot" : "";
     const reset = l.resetsAt
-      ? "reset za " + dur(Math.max(0, Date.parse(l.resetsAt)/1000 - now)) : "&nbsp;";
+      ? "resets in " + dur(Math.max(0, Date.parse(l.resetsAt)/1000 - now)) : "&nbsp;";
     return `<div class="lim ${cls} ${l.active ? "on" : ""}">
       <div class="t"><span>${esc(l.label)}</span><b>${l.percent} %</b></div>
       <div class="bar"><i style="width:${p}%"></i></div>
@@ -440,14 +442,14 @@ function card(s, now){
   return `<div class="card ${st}">
     <div class="head"><h2>${esc(s.name)}</h2>
       <span class="pill ${st}">${st === "busy" ? '<i class="spin"></i>' : ""}${
-        a ? "ceka na tebe" : st}</span></div>
+        a ? "needs you" : st}</span></div>
     <div class="meta">${esc(s.project)}${s.branch?" · "+esc(s.branch):""} · ${esc(s.kind)}
       · pid ${s.pid} · ${esc(s.model||"?")}${s.effort?" / "+esc(s.effort):""}
-      <br>${s.turns} turnu · aktivita pred ${ago(s.mtime, now)}</div>
+      <br>${s.turns} turns · active ${ago(s.mtime, now)} ago</div>
     ${att}
     <div class="bar"><i style="width:${pct}%"></i></div>
     <div class="toks">
-      <div>kontext <b>${n(s.context)} / ${n(s.contextLimit)}</b></div>
+      <div>context <b>${n(s.context)} / ${n(s.contextLimit)}</b></div>
       <div>output <b>${n(t.output)}</b></div>
       <div>cache read <b>${n(t.cache_read)}</b></div>
       <div>cache write <b>${n(t.cache_write)}</b></div>
@@ -464,20 +466,20 @@ async function tick(){
     const T = d.totals, now = d.now;
     const U = d.usage;
     document.getElementById("sub").textContent =
-      "obnoveno " + new Date().toLocaleTimeString("cs-CZ") + " · auto-refresh 3 s"
-      + (U ? " · plan " + U.plan + " · usage z cache Claude Code, stara "
-             + ago(U.fetchedAt, now) : "");
+      "updated " + new Date().toLocaleTimeString() + " · auto-refresh 3 s"
+      + (U ? " · plan " + U.plan + " · usage from the Claude Code cache, "
+             + ago(U.fetchedAt, now) + " old" : "");
     document.getElementById("cockpit").innerHTML = cockpit(U, now);
     document.getElementById("kpis").innerHTML =
       kpi(T.sessions, "sessions") + kpi(T.busy, "busy")
       + `<div class="kpi${T.waiting ? " att" : ""}"><b>${T.waiting}</b>`
-      + `<span>ceka na tebe</span></div>`
-      + kpi(T.subagents, "subagentu") + kpi(n(T.context), "kontext celkem")
-      + kpi(n(T.output), "output tokenu") + kpi(n(T.cache_read), "cache read");
+      + `<span>need you</span></div>`
+      + kpi(T.subagents, "subagents") + kpi(n(T.context), "context total")
+      + kpi(n(T.output), "output tokens") + kpi(n(T.cache_read), "cache read");
     document.getElementById("grid").innerHTML = d.sessions.map(s => card(s, now)).join("");
     document.title = (T.waiting ? `(${T.waiting}) ` : "") + "Claude agents";
   } catch (e) {
-    document.getElementById("sub").textContent = "chyba spojeni se serverem: " + e;
+    document.getElementById("sub").textContent = "connection to the server failed: " + e;
   }
 }
 tick(); setInterval(tick, 3000);
@@ -503,25 +505,25 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, *a):  # ticho
+    def log_message(self, *a):  # quiet
         pass
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Live dashboard Claude Code sessions")
+    ap = argparse.ArgumentParser(description="Live dashboard of Claude Code sessions")
     ap.add_argument("--port", type=int, default=8787)
-    ap.add_argument("--open", action="store_true", help="otevre prohlizec")
+    ap.add_argument("--open", action="store_true", help="open a browser window")
     args = ap.parse_args()
 
     url = f"http://127.0.0.1:{args.port}/"
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"Claude monitor: {url}  (Ctrl-C ukonci)")
+    print(f"Claude monitor: {url}  (Ctrl-C to quit)")
     if args.open:
         webbrowser.open(url)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
-        print("\nkonec")
+        print("\nstopped")
 
 
 if __name__ == "__main__":

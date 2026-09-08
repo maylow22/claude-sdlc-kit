@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "claude-kit",
-  "description": "Vlastní Claude Code nástroje a workflow — mimo SDLC kit.",
+  "description": "Personal Claude Code tooling and workflows.",
   "owner": {
     "name": "Miloslav Marel",
     "email": "miloslav.marel@gem.cz"
@@ -9,14 +9,14 @@
   "plugins": [
     {
       "name": "claude-monitor",
-      "description": "Live dashboard všech Claude Code sessions na stroji — stav, tokeny, kontext, strom subagentů a průběh workflow.",
+      "description": "Live dashboard of every Claude Code session on the machine — status, tokens, context, subagent tree and workflow progress.",
       "author": { "name": "Miloslav Marel" },
       "category": "productivity",
       "source": "./plugins/claude-monitor"
     },
     {
       "name": "feature",
-      "description": "Workflow pro vývoj feature — vývoj a E2E v hlavním kontextu, review plánu i kódu, lint, bezpečnost a docs v izolovaných subagentech.",
+      "description": "Feature development workflow — coding and E2E in the main context; plan review, lint, code review, security and docs in isolated subagents.",
       "author": { "name": "Miloslav Marel" },
       "category": "workflow",
       "source": "./plugins/feature"

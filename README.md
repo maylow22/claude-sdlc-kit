@@ -1,46 +1,53 @@
 # claude-kit
 
-Marketplace vlastních pluginů pro [Claude Code](https://claude.com/claude-code) —
-live dashboard běžících sessions a workflow pro vývoj feature od zadání po PR.
-Pluginy se instalují a aktualizují přes `claude plugin`.
+A marketplace of personal plugins for [Claude Code](https://claude.com/claude-code) —
+a live dashboard of running sessions, and a workflow that takes a feature from the task to
+the PR. The plugins install and update through `claude plugin`.
 
-## Pro koho
+## Who it is for
 
-Pro vývojáře, který s Claude Code pracuje denně a chce dvě věci:
+For a developer who works with Claude Code daily and wants two things:
 
-- **vidět, co se děje** — kolik sessions běží, kolik spálily tokenů, kde jsou v kontextovém
-  okně a jaké subagenty rozjely;
-- **mít na feature postup, ne improvizaci** — plán se zreviewuje proti kódu, než se píše,
-  a kód projde lintem, review, dokumentací a security review v izolovaných kontextech.
+- **to see what is going on** — how many sessions are running, how many tokens they burned,
+  where they are in the context window and which subagents they spawned;
+- **to have a procedure for a feature, not improvisation** — the plan gets reviewed against
+  the code before anything is written, and the code goes through lint, review, documentation
+  and a security review in isolated contexts.
 
-Předpokládá macOS/Linux, `python3` (stdlib, žádné závislosti) a git.
-`/feature:start` navíc počítá s autorovým setupem (branch z `develop`, `npm run test:e2e`,
-`tsc`, `lint`, Jira na `addsign.atlassian.net`) — jinde ho čeká úprava commandu.
+Assumes macOS/Linux, `python3` (stdlib, no dependencies) and git. The workflow itself is
+stack-neutral: it discovers the base branch, the test/lint/typecheck commands and the issue
+tracker from the repo rather than assuming them.
 
-## Instalace
+## Installation
 
 ```bash
-claude plugin marketplace add maylow22/claude-kit    # nebo lokálně: ~/Workspace/claude-kit
+claude plugin marketplace add maylow22/claude-kit    # or locally: ~/Workspace/claude-kit
 claude plugin install claude-monitor@claude-kit
 claude plugin install feature@claude-kit
 ```
 
-Restart Claude Code (nebo `/reload-plugins`) a pak `/claude-monitor:start`, `/feature:start`.
+Restart Claude Code (or `/reload-plugins`), then `/claude-monitor:start`, `/feature:start`.
 
-## Pluginy
+## Plugins
 
-| Plugin | Co dělá |
+| Plugin | What it does |
 |---|---|
-| [claude-monitor](plugins/claude-monitor) | Live dashboard všech sessions na stroji — vytížení plánu, stav, tokeny, obsazení kontextu, strom subagentů. Startuje sám při startu session, servíruje na `http://127.0.0.1:8787/`. |
-| [feature](plugins/feature) | `/feature:start` — celý průběh feature: zadání → branch → plán → implementace → E2E → lint → review → docs → bezpečnost → commit & PR. Plus samostatné `/feature:plan-review`, `/feature:commit`, `/feature:wiki`. |
+| [claude-monitor](plugins/claude-monitor) | Live dashboard of every session on the machine — plan utilization, status, tokens, context occupancy, subagent tree. Starts itself at session start, serves on `http://127.0.0.1:8787/`. |
+| [feature](plugins/feature) | `/feature:start` — the whole run of a feature: task → branch → plan → implementation → E2E → lint → review → docs → security → commit & PR. Plus standalone `/feature:plan-review`, `/feature:commit`, `/feature:wiki`. |
 
-Detaily (co dashboard čte, jak je workflow rozdělené mezi hlavní kontext a subagenty)
-jsou v README jednotlivých pluginů.
+The details (what the dashboard reads, how the workflow is split between the main context and
+the subagents) are in each plugin's README.
 
-## Vývoj
+## Language
 
-`claude plugin validate <cesta>` ověří manifest, `claude plugin details <name>` ukáže
-inventář komponent a token cost, `claude plugin tag` udělá release tag `{name}--v{version}`.
+The sources — commands, agents, code — are English. The conversation is not: the agents talk
+to you in the language you write in, and `/feature:commit` writes the commit message in the
+language the repo's history uses.
 
-Pro rychlou iteraci bez publikování stačí plugin nasymlinkovat do `~/.claude/skills/`
-— auto-loaduje se jako `<name>@skills-dir`.
+## Development
+
+`claude plugin validate <path>` checks the manifest, `claude plugin details <name>` shows the
+component inventory and token cost, `claude plugin tag` cuts a release tag `{name}--v{version}`.
+
+For quick iteration without publishing, symlink the plugin into `~/.claude/skills/` — it
+auto-loads as `<name>@skills-dir`.

@@ -1,151 +1,157 @@
 ---
-description: Vygeneruje nebo aktualizuje technickou wiki projektu v docs/wiki/ podle LLM-wiki vzoru — stack si zjistí sám, nic nepředpokládá
+description: Generates or updates the project's technical wiki in docs/wiki/ following the LLM-wiki pattern — discovers the stack itself, assumes nothing
 argument-hint: "[--scope=full | --scope=incremental]"
 ---
 
-Udržuj technickou wiki projektu v `docs/wiki/`. Cíl: aby budoucí AI session (i člověk)
-získala orientaci v kódu bez procházení stromu souborů — a aby cross-referency už byly
-hotové, ne dohledávané při každém dotazu.
+Maintain the project's technical wiki in `docs/wiki/`. The goal: a future AI session (or a
+human) gets oriented in the code without walking the file tree — and the cross-references are
+already made, not looked up again on every question.
 
-Tenhle command je **jazykově i stackově neutrální**. Nic nepředpokládej o technologii,
-struktuře adresářů ani doméně: všechno si zjisti z repa (fáze A) a podle toho se zařiď.
-Když něco nenajdeš, tu část wiki **nezakládej** — prázdná stránka je horší než žádná.
+This command is **language- and stack-neutral**. Assume nothing about the technology, the
+directory layout or the domain: find all of it in the repo (phase A) and act accordingly. If
+you cannot find something, **do not create** that part of the wiki — an empty page is worse
+than no page.
 
-## Tři vrstvy (LLM-wiki vzor)
+## Three layers (the LLM-wiki pattern)
 
-| Vrstva | Co to je | Kdo ji vlastní |
+| Layer | What it is | Who owns it |
 |---|---|---|
-| **raw** | kód repa, migrace, konfigurace, ADR, issue trackery | člověk; wiki do nich **nikdy** nezapisuje |
-| **wiki** | `docs/wiki/**` | tenhle command — přepisuje ji, drží konzistentní |
-| **schéma** | `CLAUDE.md`, `AGENTS.md`, `README.md`, konvence projektu | člověk; wiki se jimi řídí |
+| **raw** | the repo's code, migrations, configuration, ADRs, issue trackers | humans; the wiki **never** writes into them |
+| **wiki** | `docs/wiki/**` | this command — it rewrites it and keeps it consistent |
+| **schema** | `CLAUDE.md`, `AGENTS.md`, `README.md`, project conventions | humans; the wiki obeys them |
 
-Z toho plyne jediné tvrdé pravidlo: **wiki je kompilát, ne pravda.** Nesmí obsahovat nic,
-co není v kódu nebo ve schématu. Žádné domněnky, žádné „pravděpodobně", žádné best practices,
-které v repu nikdo nedodržuje.
+From which follows the one hard rule: **the wiki is a compilation, not the truth.** It must
+contain nothing that is not in the code or in the schema. No guesses, no "probably", no best
+practices nobody in the repo follows.
 
-## Argumenty
+## Arguments
 
-- `--scope=full` (výchozí, i když `docs/wiki/` ještě neexistuje) — kompletní regenerace.
-- `--scope=incremental` — jen to, co se změnilo od posledního běhu. Zdroj rozsahu je
-  `Source commit` z posledního záznamu v `docs/wiki/log.md`:
-  `git diff --name-only <ten commit>..HEAD`. Když log neexistuje nebo commit už v historii
-  není, řekni to a degraduj na `full`.
+- `--scope=full` (the default, and also when `docs/wiki/` does not exist yet) — full regeneration.
+- `--scope=incremental` — only what changed since the last run. The range comes from the
+  `Source commit` of the last entry in `docs/wiki/log.md`:
+  `git diff --name-only <that commit>..HEAD`. If the log does not exist or the commit is no
+  longer in history, say so and degrade to `full`.
 
-## Fáze A — Schéma a rozvaha (sekvenčně, rychlé)
+## Phase A — Schema and reconnaissance (sequential, fast)
 
-1. Přečti, co projekt o sobě říká: `README.md`, `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`,
-   `docs/**` (existující dokumentace je schéma, ne konkurence).
-2. Zjisti stack z manifestů, které v repu **skutečně jsou** — např. `package.json`,
-   `pyproject.toml`/`requirements.txt`, `go.mod`, `Cargo.toml`, `pom.xml`/`build.gradle*`,
-   `composer.json`, `Gemfile`, `*.csproj`, `mix.exs`, `Makefile`, `Dockerfile`,
-   `docker-compose.*`, CI konfigurace. Z nich vyčti: jazyky, build a run příkazy, testy,
-   linter, deploy jednotky.
-3. Zmapuj tvar repa: `git ls-files | head -300`, počty souborů podle přípony, top-level
-   adresáře. Monorepo (workspaces, `packages/*`, `apps/*`) poznáš tady — pak wiki dělej
-   **po balíčcích**, ne jako jeden slepenec.
-4. Pokud `docs/wiki/log.md` existuje, přečti poslední záznam (čas, commit, co se psalo).
-5. Jazyk wiki: ten, kterým je psaná existující dokumentace projektu; když žádná není,
-   **angličtina**. Doménové termíny **nepřekládej** — nech je v původním jazyce a vysvětli
-   je v glosáři.
-6. **Rozhodni sadu stránek** podle toho, co jsi našel (viz fáze D) a napiš si ji.
-   Nemá vzniknout stránka na téma, které projekt nemá.
+1. Read what the project says about itself: `README.md`, `CLAUDE.md`, `AGENTS.md`,
+   `CONTRIBUTING.md`, `docs/**` (existing documentation is schema, not competition).
+2. Determine the stack from the manifests that are **actually** in the repo — e.g.
+   `package.json`, `pyproject.toml`/`requirements.txt`, `go.mod`, `Cargo.toml`,
+   `pom.xml`/`build.gradle*`, `composer.json`, `Gemfile`, `*.csproj`, `mix.exs`, `Makefile`,
+   `Dockerfile`, `docker-compose.*`, CI configuration. From them read off: languages, build and
+   run commands, tests, linter, deploy units.
+3. Map the shape of the repo: `git ls-files | head -300`, file counts by extension, top-level
+   directories. A monorepo (workspaces, `packages/*`, `apps/*`) shows up here — then do the wiki
+   **per package**, not as one lump.
+4. If `docs/wiki/log.md` exists, read the last entry (time, commit, what was written).
+5. Wiki language: whatever the project's existing documentation is written in; if there is
+   none, **English**. **Do not translate domain terms** — leave them in the original language
+   and explain them in the glossary.
+6. **Decide the set of pages** based on what you found (see phase D) and write it down. No page
+   should exist for a topic the project does not have.
 
-Když v repu není žádný zdrojový kód (prázdné repo, jen konfigurace), skonči s jednou větou
-proč — wiki nemá z čeho vzniknout.
+If the repo contains no source code at all (empty repo, configuration only), stop with one
+sentence saying why — there is nothing for a wiki to be made of.
 
-## Fáze B — Discovery (paralelní subagenti v JEDNÉ zprávě)
+## Phase B — Discovery (parallel subagents in ONE message)
 
-Spusť **3–5 `Explore` subagentů paralelně**. Každý dostane jednu optiku, vrátí strukturovanou
-markdown zprávu do ~500 slov a **cituje `cesta/k/souboru:řádek`**. Zprávy nejsou wiki —
-jsou vstup pro fázi D.
+Launch **3–5 `Explore` subagents in parallel**. Each gets one lens, returns a structured
+markdown report of up to ~500 words and **cites `path/to/file:line`**. The reports are not the
+wiki — they are input for phase D.
 
-Optiky (uprav podle toho, co fáze A našla; u monorepa přidej agenta na balíček):
+The lenses (adjust to what phase A found; for a monorepo add an agent per package):
 
-1. **Architektura a hranice** — entry pointy, deploy jednotky, procesní hranice, tok dat
-   mezi nimi, konfigurace a ENV, externí služby a co se stane při jejich výpadku.
-2. **Doménový model a kontrakty** — hlavní typy/entity a jejich vztahy, schémata DB
-   a migrace, API kontrakty (routy, RPC, eventy), validace, serializace.
-3. **Opakující se patterny a konvence** — jak se v tomhle repu dělá to, co se dělá pořád
-   (přístup k datům, chyby, logování, autorizace, stav, i18n). Ke každému 1–2 ukázky
-   do 6 řádků s citací. Zvlášť vypíchni, kde se kód od konvence odchyluje.
-4. **Testy, build, CI** — jak se to spouští, testuje a nasazuje; co je pokryté a co ne.
-5. **Pasti** — mrtvý kód, obcházení konvencí, TODO/FIXME hnízda, generovaný kód, věci,
-   které v kódu vypadají jako chyba a jsou záměr (a naopak).
+1. **Architecture and boundaries** — entry points, deploy units, process boundaries, data flow
+   between them, configuration and ENV, external services and what happens when they go down.
+2. **Domain model and contracts** — the main types/entities and their relationships, DB schemas
+   and migrations, API contracts (routes, RPC, events), validation, serialization.
+3. **Recurring patterns and conventions** — how this repo does the things it does constantly
+   (data access, errors, logging, authorization, state, i18n). For each, 1–2 examples of up to
+   6 lines with a citation. Call out especially where the code departs from the convention.
+4. **Tests, build, CI** — how it is run, tested and deployed; what is covered and what is not.
+5. **Traps** — dead code, convention workarounds, TODO/FIXME nests, generated code, things that
+   look like bugs in the code but are intentional (and the reverse).
 
-Brief každému agentovi piš **s konkrétními cestami z fáze A**, ne obecně. Zakaž jim
-domýšlení: co nenajdou v kódu, nemají hlásit.
+Write each agent's brief **with concrete paths from phase A**, not in general terms. Forbid
+them to fill in gaps: what they cannot find in the code, they must not report.
 
-## Fáze C — Glosář (sekvenčně)
+## Phase C — Glossary (sequential)
 
-Vyber doménové termíny z výstupů fáze B a z názvů v kódu (typy, tabulky, routy, stavové
-hodnoty). Termín → jednovětné vysvětlení → 1–2 místa v kódu. Ber jen slova, která **nejsou
-pochopitelná z obecné znalosti** oboru: doménový žargon, zkratky, interní pojmy, názvy
-stavů workflow. Obecné programátorské pojmy do glosáře nepatří.
+Pick the domain terms out of the phase B output and out of names in the code (types, tables,
+routes, state values). Term → one-sentence explanation → 1–2 places in the code. Take only
+words that are **not understandable from general knowledge** of the field: domain jargon,
+abbreviations, internal concepts, names of workflow states. General programming terms do not
+belong in the glossary.
 
-## Fáze D — Syntéza (zapisuj v tomto pořadí)
+## Phase D — Synthesis (write in this order)
 
-Pořadí není libovolné — pozdější stránky odkazují na dřívější, `index.md` je až poslední.
+The order is not arbitrary — later pages link to earlier ones, and `index.md` comes last.
 
-1. `architecture.md` — hranice, entry pointy, tok dat, deploy jednotky, build a run příkazy.
-   Tok dat popiš jedním ASCII diagramem nebo bulletovým flow, ne odstavcem prózy.
-2. `concepts/<pattern>.md` — jedna stránka na pattern z optiky 3. Vždy: k čemu to je,
-   jak se to v repu dělá, ukázka do 6 řádků s citací, kde jsou odchylky.
-3. `entities/<jmeno>.md` — jedna stránka na věc, která je uzlem grafu: klíčový modul,
-   dispatcher, doménová entita, tabulka, veřejné API. Ne na každý soubor v repu.
-4. `domain-model.md` — entity a jejich vztahy z optiky 2 (jen když projekt doménový model má).
-5. `testing.md` — jak se testuje a spouští; co je pokryté a co ne (z optiky 4).
-6. `glossary.md` — tabulka z fáze C.
-7. `gotchas.md` — z optiky 5 plus pasti ze schématu, každá jako plná věta s citací.
-8. `index.md` — **poslední.** Dvě věty úvodu, pak katalog všech stránek s jednovětou anotací.
-   Podle tohohle souboru se v wiki orientuje ten, kdo ji nikdy neviděl.
-9. `log.md` — **append-only**, přidej záznam:
+1. `architecture.md` — boundaries, entry points, data flow, deploy units, build and run commands.
+   Describe the data flow with a single ASCII diagram or a bulleted flow, not a paragraph of prose.
+2. `concepts/<pattern>.md` — one page per pattern from lens 3. Always: what it is for, how the
+   repo does it, an example of up to 6 lines with a citation, where the deviations are.
+3. `entities/<name>.md` — one page per thing that is a node in the graph: a key module, a
+   dispatcher, a domain entity, a table, a public API. Not per file in the repo.
+4. `domain-model.md` — entities and their relationships from lens 2 (only if the project has a
+   domain model).
+5. `testing.md` — how it is tested and run; what is covered and what is not (from lens 4).
+6. `glossary.md` — the table from phase C.
+7. `gotchas.md` — from lens 5 plus the traps in the schema, each as a full sentence with a citation.
+8. `index.md` — **last.** Two sentences of introduction, then a catalog of every page with a
+   one-sentence annotation. This file is how someone who has never seen the wiki finds their way.
+9. `log.md` — **append-only**, add an entry:
 
    ```
    ## [YYYY-MM-DD HH:MM] full | incremental
 
-   - Zapsáno: <N> souborů — <výčet>
-   - Source commit: <git rev-parse --short HEAD><pokud `git status --porcelain` není
-     prázdný, připiš " + nezacommitované změny"; z workflow to tak běží vždy, wiki
-     popisuje strom, ne commit>
-   - Poznámky: <co je nového od posledního běhu; u prvního běhu "initial generation">
+   - Written: <N> files — <list>
+   - Source commit: <git rev-parse --short HEAD><if `git status --porcelain` is not
+     empty, append " + uncommitted changes"; from the workflow it always runs that way,
+     the wiki describes the tree, not the commit>
+   - Notes: <what is new since the last run; on the first run "initial generation">
    ```
 
-Sadu stránek ber jako doporučení, ne příkaz: **stránka bez obsahu se nezakládá** a naopak,
-když má projekt něco výrazného mimo tenhle seznam, dej tomu stránku a zmiň ji v `index.md`.
+Treat the page set as a recommendation, not an order: **a page with no content does not get
+created**, and conversely, when the project has something notable outside this list, give it a
+page and mention it in `index.md`.
 
-U `--scope=incremental` přepisuj jen stránky, kterých se změněné soubory dotýkají, a vždy
-`index.md` (anotace) a `log.md`. Nedotčené stránky nechej být — i když bys je napsal jinak.
+With `--scope=incremental`, rewrite only the pages the changed files touch, plus always
+`index.md` (annotations) and `log.md`. Leave the untouched pages alone — even if you would
+write them differently.
 
-## Fáze E — Lint
+## Phase E — Lint
 
-Projdi, co jsi zapsal, a ověř:
+Go over what you wrote and verify:
 
-- každý relativní odkaz míří na existující soubor v `docs/wiki/`,
-- na každou stránku vede odkaz z `index.md` (žádný sirotek),
-- žádné dvě stránky netvrdí o téže věci něco jiného,
-- každé tvrzení, které se dá ověřit, má citaci `cesta:řádek`, a ta cesta existuje,
-- ukázky kódu odpovídají tomu, co je dnes v repu (u `incremental` hlavně ty nedotčené).
+- every relative link points at a file that exists in `docs/wiki/`,
+- every page is linked from `index.md` (no orphans),
+- no two pages claim different things about the same subject,
+- every verifiable claim has a `path:line` citation, and that path exists,
+- the code examples match what is in the repo today (with `incremental`, especially the
+  untouched ones).
 
-Nálezy **netiš přepsáním** — připoj je na konec posledního záznamu v `log.md` jako
-`### Lint` s výčtem. Rozbité odkazy oprav, rozpory nahlas.
+**Do not silence findings by rewriting** — append them to the end of the last entry in `log.md`
+as `### Lint` with a list. Fix broken links, report contradictions.
 
-## Fáze F — Report uživateli (max 6 řádků)
+## Phase F — Report to the user (max 6 lines)
 
-- rozsah (`full` / `incremental`) a proč, pokud došlo k degradaci
-- kolik stránek zapsáno, kolik nedotčeno
-- kolik termínů v glosáři
-- lint: rozbité odkazy, sirotci, rozpory (ideálně nuly)
-- jedno doporučení, co dál (typicky kdy pustit znovu)
+- scope (`full` / `incremental`) and why, if it degraded
+- how many pages written, how many untouched
+- how many terms in the glossary
+- lint: broken links, orphans, contradictions (ideally zeroes)
+- one recommendation for what is next (typically when to run it again)
 
-## Pravidla obsahu
+## Content rules
 
-- Wiki nesmí tvrdit nic, co není v kódu nebo ve schématu. **Nedoplňuj domněnky.**
-- Každá stránka začíná `#` nadpisem, který odpovídá jejímu účelu.
-- Cross-linkuj hojně relativními odkazy — hotové vazby jsou celý smysl wiki proti tomu,
-  dohledávat je při každém dotazu znovu.
-- Cituj kód jako `cesta/k/souboru:řádek`. Ukázky do 6 řádků, nikdy celé soubory.
-- **Nikdy needituj zdrojový kód.** Wiki je výstup, kód je vstup.
-- Soubory v `docs/wiki/`, které tenhle command neumí regenerovat (ruční poznámky, ADR),
-  **nechej být** — přepisuj jen to, co sám píšeš.
-- Bez emoji, bez zmínek o AI/Claude, bez `Co-Authored-By` v obsahu wiki.
-- Necommituj. Commit řeší člověk (`/feature:commit`).
+- The wiki must not claim anything that is not in the code or the schema. **Do not fill in guesses.**
+- Every page starts with a `#` heading matching its purpose.
+- Cross-link generously with relative links — the finished connections are the entire point of
+  a wiki over looking them up again on every question.
+- Cite code as `path/to/file:line`. Examples up to 6 lines, never whole files.
+- **Never edit source code.** The wiki is the output, the code is the input.
+- Files in `docs/wiki/` that this command cannot regenerate (hand-written notes, ADRs) are to be
+  **left alone** — rewrite only what you write yourself.
+- No emoji, no mentions of AI/Claude, no `Co-Authored-By` in the wiki content.
+- Do not commit. Commits are the human's business (`/feature:commit`).

@@ -1,5 +1,5 @@
 {
-  "description": "Pri startu session nastartuje dashboard a posle jeho URL do kontextu; Notification hooky hlasi dashboardu, ze session ceka na uzivatele.",
+  "description": "Starts the dashboard on session start and pushes its URL into the session context; Notification hooks tell the dashboard that a session is waiting on the user.",
   "hooks": {
     "SessionStart": [
       {

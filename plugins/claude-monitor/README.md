@@ -1,80 +1,81 @@
 # claude-monitor
 
-Live dashboard všech Claude Code sessions běžících na stroji. Zero-dep Python
-(stdlib), servíruje samostatnou HTML stránku s auto-refreshem 3 s.
+A live dashboard of every Claude Code session running on the machine. Zero-dependency Python
+(stdlib), serving a standalone HTML page that auto-refreshes every 3 s.
 
 ```
-# obvykle nic — dashboard nastartuje sam pri startu session (SessionStart hook)
+# usually nothing — the dashboard starts itself at session start (SessionStart hook)
 /claude-monitor:start          # → http://127.0.0.1:8787/
 python3 tools/claude_monitor.py --port 8787 --open
 ```
 
-## Kdo čeká na tebe
+## Who is waiting on you
 
-Session, která stojí na tvém vstupu, jde **nahoru mezi ostatní karty**, dostane oranžový
-rám s pulzem, pill `ceka na tebe` a řádek s důvodem a tím, jak dlouho už čeká. Počet
-takových sessions je i v KPI a v `<title>` stránky (`(2) Claude agents`) — takže to
-uvidíš i na neaktivním tabu prohlížeče.
+A session blocked on your input goes **to the top, ahead of the other cards**, gets an orange
+frame with a pulse, a `needs you` pill and a line with the reason and how long it has been
+waiting. The count of such sessions is in the KPIs and in the page `<title>`
+(`(2) Claude agents`) — so you see it even on an inactive browser tab.
 
-Důvod se bere ze dvou zdrojů:
+The reason comes from two sources:
 
-| Zdroj | Co pozná | Kdy |
+| Source | What it knows | When |
 |---|---|---|
-| `claude agents --json` → `status: waiting` | že session čeká (`waitingFor`) | vždy, i bez pluginu |
-| `Notification` hook | **proč** — povolení nástroje (i který), MCP dialog, idle 60 s | po restartu session s pluginem |
+| `claude agents --json` → `status: waiting` | that the session is waiting (`waitingFor`) | always, even without the plugin |
+| `Notification` hook | **why** — a tool permission (and which tool), an MCP dialog, 60 s idle | after restarting the session with the plugin |
 
-Hook zapíše `~/.claude/monitor/notify/<sessionId>.json`; dashboard ho bere jako platný,
-dokud se transcript nepohne dál — odpověď uživatele znamená zápis do transcriptu, a tím
-záznam zestárne.
+The hook writes `~/.claude/monitor/notify/<sessionId>.json`; the dashboard treats it as valid
+until the transcript moves past it — a user's answer means a write to the transcript, and that
+is what ages the record out.
 
 ## Autostart
 
-`SessionStart` hook při každém startu session zkontroluje port 8787. Když tam nikdo
-neposlouchá, spustí dashboard **odpojeně** (přežije konec session), a tak či tak pošle
-jeho URL do kontextu session — takže se ho stačí zeptat, kde běží.
+The `SessionStart` hook checks port 8787 on every session start. If nobody is listening it
+starts the dashboard **detached** (surviving the end of the session), and either way it pushes
+the URL into the session context — so you can just ask the session where it is running.
 
-| Proměnná | Efekt |
+| Variable | Effect |
 |---|---|
-| `CLAUDE_MONITOR_PORT=8788` | jiný port (hook i server) |
-| `CLAUDE_MONITOR_AUTOSTART=0` | hook skončí tiše a nic nespustí |
+| `CLAUDE_MONITOR_PORT=8788` | a different port (hook and server alike) |
+| `CLAUDE_MONITOR_AUTOSTART=0` | the hook exits quietly and starts nothing |
 
-Server je **singleton na stroj**, ne na session: druhá session ho už jen najde. Když dvě
-odstartují naráz, druhý proces spadne na obsazený port a přežije jeden — do kontextu jde
-v obou případech tatáž URL. Ukončíš ho `kill $(lsof -ti:8787)`; sám se neukončí.
+The server is a **singleton per machine**, not per session: a second session merely finds it.
+When two start at once, the second process dies on the taken port and one survives — either way
+the same URL goes into the context. You stop it with `kill $(lsof -ti:8787)`; it will not stop
+on its own.
 
-## Co ukazuje
+## What it shows
 
-- **usage cockpit** — vytížení plánu (5h session, týdenní limit, týdenní limit modelu)
-  s procenty a odpočtem do resetu; aktivní limit je zvýrazněný
-- **stav** — čeká na tebe / busy / idle, pid, kind (interactive/background), projekt, živý git branch
-- **tokeny** — output, input, cache read/write, thinking; obsazení kontextového okna
-- **strom subagentů** — agentType, popis, output tokeny, jak dávno byl aktivní
+- **usage cockpit** — plan utilization (5 h session, weekly limit, weekly model limit) with
+  percentages and a countdown to the reset; the active limit is highlighted
+- **status** — needs you / busy / idle, pid, kind (interactive/background), project, live git branch
+- **tokens** — output, input, cache read/write, thinking; context window occupancy
+- **subagent tree** — agentType, description, output tokens, how long ago it was active
 
-## Zdroje dat
+## Data sources
 
-| Co | Odkud |
+| What | From where |
 |---|---|
-| seznam sessions, stav, `waitingFor` | `claude agents --json` |
-| tokeny, model, effort | `~/.claude/projects/<slug>/<sessionId>.jsonl` → `.message.usage` |
-| strom subagentů | `<sessionId>/subagents/agent-*.meta.json` |
-| git branch | `git -C <cwd> branch --show-current` (živě — v transcriptu bývá zastaralý) |
-| usage cockpit | `~/.claude.json` → `cachedUsageUtilization` (cache, kterou plní `/usage`) |
-| autostart + URL do session | `hooks/session-start.sh` (SessionStart hook) |
-| důvod čekání na uživatele | `hooks/notification.py` → `~/.claude/monitor/notify/<sessionId>.json` |
+| session list, status, `waitingFor` | `claude agents --json` |
+| tokens, model, effort | `~/.claude/projects/<slug>/<sessionId>.jsonl` → `.message.usage` |
+| subagent tree | `<sessionId>/subagents/agent-*.meta.json` |
+| git branch | `git -C <cwd> branch --show-current` (live — the transcript's copy tends to be stale) |
+| usage cockpit | `~/.claude.json` → `cachedUsageUtilization` (the cache `/usage` fills) |
+| autostart + URL into the session | `hooks/session-start.sh` (SessionStart hook) |
+| the reason for waiting on the user | `hooks/notification.py` → `~/.claude/monitor/notify/<sessionId>.json` |
 
-Transcripty se čtou inkrementálně (pamatuje si offset), takže refresh je konstantně levný
-i u vícemegabajtových souborů.
+Transcripts are read incrementally (the offset is remembered), so a refresh costs the same
+whether the file is small or several megabytes.
 
-## Pasti
+## Traps
 
-- Transcript v `message.model` **neuvádí sufix `[1m]`** — 1M tier z logu nerozlišíš.
-  Kontextové limity jsou proto v `CONTEXT_LIMITS` na začátku skriptu (Claude 5 rodina 1M,
-  Haiku 4.5 200K); Claude Code může auto-compactovat dřív.
-- Usage se **nedotahuje z API** — čte se cache, kterou si zapisuje sám Claude Code.
-  Stáří cache je proto vypsané v hlavičce; `/usage` v libovolné session ji obnoví.
-- Záznam z `Notification` hooku se zneplatní až zápisem do transcriptu. Po schválení
-  povolení se ale do transcriptu nic nezapíše, dokud nástroj nedoběhne — u dlouhého
-  příkazu proto může „ceka na povoleni" chvíli viset i po odklepnutí. Stav `waiting`
-  z CLI tímhle netrpí.
-- Branch je vlastnost **worktree, ne session** — víc sessions v jednom adresáři je vždy
-  na téže větvi a `checkout` jedné přepne branch všem ostatním.
+- The transcript's `message.model` **does not carry the `[1m]` suffix** — you cannot tell the
+  1M tier from the log. The context limits therefore live in `CONTEXT_LIMITS` at the top of the
+  script (Claude 5 family 1M, Haiku 4.5 200K); Claude Code may auto-compact earlier.
+- Usage is **not fetched from the API** — it reads the cache Claude Code writes itself. The age
+  of the cache is printed in the header; `/usage` in any session refreshes it.
+- A `Notification` hook record is only invalidated by a write to the transcript. After you
+  approve a permission, though, nothing is written to the transcript until the tool finishes —
+  so for a long command "waiting for tool permission" can hang around for a while after you
+  clicked through. The `waiting` status from the CLI does not suffer from this.
+- A branch belongs to the **worktree, not the session** — several sessions in one directory are
+  always on the same branch, and a `checkout` in one switches the branch for all the others.

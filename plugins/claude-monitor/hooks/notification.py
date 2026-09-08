@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Notification hook: zapise, ze tahle session ceka na uzivatele.
+"""Notification hook: records that this session is waiting on the user.
 
-Claude Code posila Notification s matcherem permission_prompt / idle_prompt /
-elicitation_dialog. Matcher v payloadu neni, takze druh dostaneme argumentem.
+Claude Code fires Notification with a permission_prompt / idle_prompt /
+elicitation_dialog matcher. The matcher is not in the payload, so we take the
+kind as an argument.
 
-Zapisuje ~/.claude/monitor/notify/<sessionId>.json; dashboard soubor bere jako
-platny, dokud transcript nepokrocil dal (odpoved uzivatele = zapis do transcriptu,
-tj. mtime > ts => zaznam je zastaraly).
+Writes ~/.claude/monitor/notify/<sessionId>.json; the dashboard treats the file
+as valid until the transcript moves past it (a user answer = a write to the
+transcript, i.e. mtime > ts => the record is stale).
 """
 
 import json

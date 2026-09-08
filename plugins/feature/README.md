@@ -1,81 +1,92 @@
 # feature
 
-Workflow pro vývoj jedné feature od zadání po PR. Tři commandy, jeden namespace.
-Žádný stavový soubor ani vlastní tracking — postup vidíš v terminálu, subagenty
-v [claude-monitoru](../claude-monitor).
+A workflow for taking one feature from the task to the PR. Three commands, one namespace.
+No state file and no tracking of its own — you see the progress in the terminal and the
+subagents in [claude-monitor](../claude-monitor).
 
-| Command | Co dělá |
+| Command | What it does |
 |---|---|
-| `/feature:start <Jira klíč \| URL \| popis>` | celý průběh: zadání → branch → plán → implementace → E2E → lint → review → opravy → docs → konzultace → commit & PR |
-| `/feature:plan-review [cesta k plánu]` | adversariální review plánu proti skutečnému kódu, než se začne psát |
-| `/feature:commit` | git commit s českou hláškou, bez emoji a bez Co-Authored-By |
-| `/feature:wiki [--scope=full\|incremental]` | wiki projektu v `docs/wiki/` podle LLM-wiki vzoru — stack si zjistí sám |
+| `/feature:start <issue key \| URL \| description>` | the whole run: task → branch → plan → implementation → E2E → lint → review → fixes → docs → consultation → commit & PR |
+| `/feature:plan-review [path to plan]` | adversarial review of the plan against the real code, before anything gets written |
+| `/feature:commit` | git commit, no emoji and no Co-Authored-By, in the language of the repo's history |
+| `/feature:wiki [--scope=full\|incremental]` | the project wiki in `docs/wiki/` following the LLM-wiki pattern — discovers the stack itself |
 
-`/feature:start` si `/feature:commit` i `/feature:wiki` volá sám (wiki přes doc-writera);
-samostatně je pustíš, když workflow neběží.
+`/feature:start` calls `/feature:commit` and `/feature:wiki` itself (the wiki through the
+doc-writer); you run them standalone when the workflow is not running.
 
-## Dělení kontextu
+## How the context is split
 
-Jádro workflow drží **hlavní agent**, protože potřebuje jednu nit od zadání ke kódu:
+The **main agent** holds the core of the workflow, because it needs one thread from the task
+to the code:
 
-| Krok | Kde běží |
+| Step | Where it runs |
 |---|---|
-| 1 Zadání · 2 Branch | hlavní kontext |
-| 3 Plán — sestavení a zapracování nálezů | hlavní kontext |
-| 3 Plán — review | `feature:plan-reviewer` (čistý kontext) |
-| 4 Implementace · 5 E2E | hlavní kontext |
-| 6 Lint & formát | `feature:linter` (čistý kontext) |
-| 7 Review kódu | `feature:reviewer` (čistý kontext) |
-| 8 Opravy nálezů | hlavní kontext |
-| 9 Dokumentace | `feature:doc-writer` (čistý kontext) 
-| 10 Bezpečnost | `feature:security-reviewer` (čistý kontext, vidí i docs) |
-| 11 Konzultace · 12 Commit & PR | hlavní kontext |
+| 1 Task · 2 Branch | main context |
+| 3 Plan — drafting and folding in findings | main context |
+| 3 Plan — review | `feature:plan-reviewer` (clean context) |
+| 4 Implementation · 5 E2E | main context |
+| 6 Lint & format | `feature:linter` (clean context) |
+| 7 Code review | `feature:reviewer` (clean context) |
+| 8 Fixing findings | main context |
+| 9 Documentation | `feature:doc-writer` (clean context) |
+| 10 Security | `feature:security-reviewer` (clean context, sees the docs too) |
+| 11 Consultation · 12 Commit & PR | main context |
 
-Mechanický úklid je subagent ze stejného důvodu, i když nic nehodnotí: výstup formatteru,
-eslintu a `tsc` je nejdelší a nejméně zajímavá věc v celém workflow. Zadání proto vůbec
-nedostane — lintovat se dá bez znalosti záměru.
+Mechanical cleanup is a subagent for the same reason, even though it judges nothing: the output
+of the formatter, the linter and the typechecker is the longest and least interesting thing in
+the entire workflow. Which is why it does not get the task at all — you can lint without knowing
+the intent.
 
-Bezpečnost je záměrně **poslední krok**, ne paralelní s review kódu: teprve po dokumentaci
-je diff kompletní, a docs jsou plnohodnotná security plocha — příklad s tokenem, interní URL
-nebo návod, podle kterého si čtenář vypne verifikaci, je nález stejně jako díra v kódu.
+Security is deliberately the **last step**, not parallel to the code review: only after the
+documentation is the diff complete, and docs are a full security surface — an example with a
+token, an internal URL, or an instruction that has the reader turn verification off is a finding
+just as much as a hole in the code.
 
-Kontrolní agenti dostanou **nejvýš zadání, branch a diff** — nikdy průběh vývoje. Nevědí, co
-jsi zvažoval, co zahodil ani co už uživatel odsouhlasil, takže se nemají čeho chytit a jejich
-nález má váhu. `feature:linter` a `feature:security-reviewer` nedostanou ani zadání: úklid ho
-nepotřebuje a security review se nemá čím nechat přesvědčit, že díra je vlastně záměr. Reviewery navíc chybí `Edit`: nálezy vracejí, opravuje je hlavní agent, který
-kód zná. Doc-writer psát smí (dokumentace je práce, ne oprava), ale necommituje.
+The checking agents get **at most the task, the branch and the diff** — never the course of
+development. They do not know what you weighed, what you discarded or what the user already
+approved, so they have nothing to latch onto and their findings carry weight. `feature:linter`
+and `feature:security-reviewer` do not even get the task: cleanup does not need it, and a
+security review must have nothing available to talk it into believing a hole is the design. The
+reviewers also lack `Edit`: they hand findings back, and the main agent, which knows the code,
+fixes them. The doc-writer may write (documentation is work, not a fix) but does not commit.
 
-Při dalším kole (uživatel má připomínky) se agenti spouštějí **znovu od nuly**, ne jako
-pokračování — jinak by si kontext natáhli zpátky.
+On a second round (the user has comments) the agents are launched **from scratch again**, not as
+a continuation — otherwise they would pull the context back in.
 
-Command nese **recept**, agent je **hranice kontextu** — nejsou to konkurenční varianty.
-`/feature:wiki` je proto command: člověk si ho pustí přímo (a běží v jeho kontextu), z workflow
-ho volá `feature:doc-writer`, takže tam ta práce padne do jeho okna. Proto má doc-writer
-`Agent` — aby mu fáze B rozjela discovery subagenty.
+A command carries the **recipe**, an agent is a **context boundary** — they are not competing
+options. That is why `/feature:wiki` is a command: a person runs it directly (and it runs in
+their context), while from the workflow `feature:doc-writer` calls it, so the work lands in its
+window instead. Which is also why the doc-writer has `Agent` — so phase B can spawn its discovery
+subagents.
 
-## Agenti
+## The agents
 
-| Agent | Kontext | Nástroje | Výstup |
+| Agent | Context | Tools | Output |
 |---|---|---|---|
-| `feature:plan-reviewer` | zadání, plán | read-only | verdikt + nálezy Blocking/Should-fix proti reálnému kódu |
-| `feature:linter` | jen branch + diff | + Edit | co formatter/lint/tsc opravily a co zbylo autorovi |
-| `feature:reviewer` | zadání, plán, diff | read-only + Skill | verdikt PASS/CHANGES + nálezy dle závažnosti |
-| `feature:security-reviewer` | jen branch + diff (kód **i** docs) | read-only + Skill | verdikt + nálezy s cestou ke zneužití |
-| `feature:doc-writer` | zadání, diff | + Write/Edit | co zapsal, co ne a proč, stav wiki |
+| `feature:plan-reviewer` | task, plan | read-only | verdict + Blocking/Should-fix findings against the real code |
+| `feature:linter` | branch + diff only | + Edit | what the formatter/lint/typecheck fixed and what is left for the author |
+| `feature:reviewer` | task, plan, diff | read-only + Skill | PASS/CHANGES verdict + findings by severity |
+| `feature:security-reviewer` | branch + diff only (code **and** docs) | read-only + Skill | verdict + findings with a path to exploitation |
+| `feature:doc-writer` | task, diff | + Write/Edit | what it wrote, what it did not and why, wiki status |
 
-## Brány, na kterých se čeká na tebe
+## The gates that wait for you
 
-Zadání, **zreviewovaný** plán, konzultace, commit & push. Bez výslovného souhlasu workflow necommituje,
-nepushuje ani nevytváří PR (PR se jen vygeneruje jako odkaz — `gh` se nepoužívá).
+The task, the **reviewed** plan, the consultation, commit & push. Without explicit approval the
+workflow does not commit, does not push and does not create a PR (the PR is only generated as a
+link — `gh` is not used).
 
-## Konvence napevno
+## What it discovers, and what it does not
 
-Workflow počítá s autorovým setupem: branch z `develop`, `npm run test:e2e` / `tsc` /
-`lint`, Jira na `addsign.atlassian.net`.
+`/feature:start` reads the project rather than assuming it: the base branch (`develop` if the
+repo has one, otherwise the default branch), the e2e/lint/typecheck commands from the manifests
+that are actually there, the branch naming convention from the history, and the issue detail
+through an Atlassian MCP server if one is configured. Where it finds nothing, it skips the step
+and says so.
 
-`/feature:wiki` je naopak **stackově neutrální** — jazyk, build, testy i tvar repa si zjistí
-z manifestů a `git ls-files`, sadu stránek určí podle toho, co v projektu opravdu je, a stránku
-bez obsahu nezakládá. Drží tři vrstvy LLM-wiki vzoru: kód je raw zdroj (nikdy do něj nezapisuje),
-`docs/wiki/**` vlastní, `CLAUDE.md`/`AGENTS.md`/`README.md` je schéma, kterým se řídí.
-`index.md` je katalog, `log.md` append-only historie, a `--scope=incremental` přepíše jen
-stránky dotčené diffem od posledního záznamu v logu.
+`/feature:wiki` is stack-neutral the same way — it works out the language, build, tests and the
+shape of the repo from the manifests and `git ls-files`, decides the page set from what the
+project actually has, and does not create a page with no content. It holds the three layers of
+the LLM-wiki pattern: code is the raw source (it never writes into it), `docs/wiki/**` is its
+own, and `CLAUDE.md`/`AGENTS.md`/`README.md` is the schema it obeys. `index.md` is the catalog,
+`log.md` an append-only history, and `--scope=incremental` rewrites only the pages touched by
+the diff since the last entry in the log.

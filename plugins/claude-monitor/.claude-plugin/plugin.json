@@ -2,7 +2,7 @@
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "claude-monitor",
   "version": "0.2.0",
-  "description": "Live dashboard všech Claude Code sessions na stroji — stav, tokeny, kontext, strom subagentů a průběh workflow.",
+  "description": "Live dashboard of every Claude Code session on the machine — status, tokens, context, subagent tree and workflow progress.",
   "author": {
     "name": "Miloslav Marel",
     "email": "miloslav.marel@gem.cz"

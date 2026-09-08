@@ -1,151 +1,187 @@
 ---
-description: Spustí workflow pro novou feature — branch, plán, implementace a E2E v hlavním kontextu, review plánu/lint/review kódu/bezpečnost/dokumentace v izolovaných subagentech
-argument-hint: <Jira klíč | Jira URL | popis úkolu>
+description: Runs the workflow for a new feature — branch, plan, implementation and E2E in the main context; plan review, lint, code review, security and docs in isolated subagents
+argument-hint: <issue key | issue URL | task description>
 ---
 
-Workflow pro vývoj nové feature. Argument je povinný — buď **Jira klíč** (např. `IF-9`), **Jira URL** (`https://addsign.atlassian.net/browse/IF-9`) nebo **volný popis** úkolu v češtině.
+Workflow for developing a new feature. The argument is required — either an **issue key**
+(e.g. `IF-9`), an **issue URL** (e.g. `https://<your-org>.atlassian.net/browse/IF-9`) or a
+**free-form description** of the task.
 
-Pokud argument chybí, **zeptej se** uživatele co implementovat — nepokračuj bez něj.
+If the argument is missing, **ask** the user what to implement — do not continue without it.
 
-## Dělení kontextu
+## How the context is split
 
-- **Hlavní kontext (ty)** — zadání, plán, implementace, E2E testy, opravy nálezů,
-  konzultace, commit a PR. Tohle všechno drží jednu nit a ty u toho zůstáváš.
-- **Izolované subagenty (kroky 3, 6, 7, 9 a 10)** — review plánu, úklid, review kódu,
-  dokumentace a nakonec bezpečnost. Každý dostane **čistý kontext** a v něm nejvýš zadání,
-  plán a branch — nikdy průběh vývoje. Nevědí, jak jsi se k řešení dopracoval, co jsi
-  zvažoval ani co jsi po cestě zahodil, proto jejich nález něco znamená. Diff si každý
-  vytáhne sám.
-- `feature:linter` a `feature:security-reviewer` dostanou **jen branch**: úklid zadání
-  nepotřebuje a security review se nemá čím nechat přesvědčit, že díra je vlastně záměr.
-- Do promptu subagentům **nepiš** vysvětlení, obhajoby ani "tohle už jsme řešili".
-  Kdo kód hodnotí, nesmí znát autorovu argumentaci.
-- Subagenti sami **necommitují** a reviewery **neopravují kód** — nálezy triáduješ a opravuješ
-  ty v krocích 8 a 10. Dokumentaci píše doc-writer, protože to je samostatná práce, ne oprava.
-- **Bezpečnost jde jako poslední**, až po dokumentaci — aby v diffu viděla i docs.
-- Mechanický úklid (formatter, lint, typecheck) je taky subagent — jeho výstup bývá
-  nejdelší a nejméně zajímavý z celého workflow, tak ať nesedí v hlavním kontextu.
+- **Main context (you)** — task, plan, implementation, E2E tests, fixing findings,
+  consultation, commit and PR. All of this holds a single thread and you stay with it.
+- **Isolated subagents (steps 3, 6, 7, 9 and 10)** — plan review, cleanup, code review,
+  documentation and finally security. Each gets a **clean context** holding at most the task,
+  the plan and the branch — never the course of development. They do not know how you arrived
+  at the solution, what you weighed or what you threw away along the way; that is what makes
+  their findings mean something. Each pulls its own diff.
+- `feature:linter` and `feature:security-reviewer` get **only the branch**: cleanup does not
+  need the task, and a security review must have nothing available to talk it into believing
+  a hole is actually the design.
+- **Do not write** explanations, defenses or "we already dealt with this" into a subagent's
+  prompt. Whoever judges the code must not know the author's argument.
+- Subagents **do not commit** and the reviewers **do not fix code** — you triage and fix the
+  findings in steps 8 and 10. Documentation is written by the doc-writer, because that is work
+  of its own, not a fix.
+- **Security goes last**, after documentation — so it sees the docs in the diff too.
+- Mechanical cleanup (formatter, lint, typecheck) is a subagent as well — its output tends to
+  be the longest and least interesting thing in the whole workflow, so keep it out of the main
+  context.
 
-## Postup
+## Steps
 
-### 1. Zadání
-- Jira klíč nebo URL → načti detail přes MCP `mcp__claude_ai_Atlassian_Rovo__getJiraIssue` (cloudId = `addsign.atlassian.net`, `responseContentFormat: "markdown"`). Extrahuj summary, description, status, assignee.
-- Volný popis → použij jak je. Zeptej se uživatele na krátký český slug pro branch (např. `rozbalit-informace`).
-- Shrň zadání 2-3 větami a **počkej na potvrzení** než budeš pokračovat. Pokud je něco nejasné, zeptej se.
+### 1. The task
+- Issue key or URL → fetch the detail through an Atlassian MCP server if one is configured
+  (`getAccessibleAtlassianResources` to resolve the cloudId for the site in the URL — or the
+  only site available — then `getJiraIssue` with `responseContentFormat: "markdown"`). Extract
+  summary, description, status, assignee. If no Atlassian MCP is available, ask the user to
+  paste the ticket content.
+- Free-form description → use it as is. Ask the user for a short slug for the branch (e.g.
+  `expand-details`).
+- Summarize the task in 2–3 sentences and **wait for confirmation** before continuing. If
+  anything is unclear, ask.
 
 ### 2. Feature branch
-- Ověř že working tree je čistý (`git status`). Pokud ne, **stop** a zeptej se uživatele.
-- Přepni se na `develop` a stáhni si nejnovější stav (`git fetch origin && git checkout develop && git pull --ff-only`).
-- Vytvoř branch `feature/<KEY>-<slug>` (např. `feature/IF-9-rozbalit-informace`). Slug je krátký, lowercase, pomlčky místo mezer, bez diakritiky. Pokud Jira klíč chybí, použij jen `feature/<slug>`.
+- Verify the working tree is clean (`git status`). If not, **stop** and ask the user.
+- Determine the **base branch**: `develop` if the repo has it, otherwise the default branch
+  (`git symbolic-ref refs/remotes/origin/HEAD`, typically `main`). Confirm it with the user if
+  the repo has both and the choice is not obvious. That branch is `baseBranch` for the rest of
+  the workflow.
+- Switch to it and pull the latest state (`git fetch origin && git checkout <baseBranch> &&
+  git pull --ff-only`).
+- Create the branch `feature/<KEY>-<slug>` (e.g. `feature/IF-9-expand-details`). The slug is
+  short, lowercase, hyphens instead of spaces, ASCII only. Without an issue key, just
+  `feature/<slug>`. If the repo's history uses a different branch naming convention, follow
+  that one instead.
 
-### 3. Plán (a jeho review, než ho uvidí uživatel)
-- Sestav **plán implementace** — stručné kroky (co/kde/jak), klíčové soubory, rizika.
-  Zapiš ho do `.claude/plans/<branch-slug>.md`, ať má review i uživatel co číst.
-- **Nech ho zreviewovat, než ho předložíš:** `/feature:plan-review .claude/plans/<slug>.md`,
-  tedy agent `feature:plan-reviewer` s čistým kontextem. Ověří plán proti skutečnému kódu —
-  že jmenované soubory a symboly existují, že pořadí kroků drží, že se nevynalézá znovu,
-  co v repu je, a že plán pokrývá zadání a nic navíc.
-- Blokující nálezy **zapracuj do plánu**, should-fix podle úsudku (co ne, s důvodem).
-- Uživateli předlož **až zreviewovaný plán** + tři řádky o tom, co review našlo a co se
-  v plánu proto změnilo. Neschvaluje se první nástřel.
-- **Počkej na výslovné odsouhlasení.** Bez souhlasu nepokračuj na implementaci.
-- Pokud uživatel chce úpravy, plán uprav; při podstatné změně pusť review **znovu**
-  (nový agent, ne pokračování toho starého).
+### 3. The plan (and its review, before the user sees it)
+- Put together an **implementation plan** — brief steps (what/where/how), key files, risks.
+  Write it to `.claude/plans/<branch-slug>.md` so both the review and the user have something
+  to read.
+- **Have it reviewed before you present it:** `/feature:plan-review .claude/plans/<slug>.md`,
+  i.e. the `feature:plan-reviewer` agent with a clean context. It verifies the plan against
+  the real code — that the named files and symbols exist, that the step order holds, that
+  nothing already in the repo is being reinvented, and that the plan covers the task and
+  nothing beyond it.
+- **Fold blocking findings into the plan**, should-fix at your discretion (say what you left
+  out and why).
+- Present the user **only the reviewed plan** plus three lines on what the review found and
+  what changed in the plan because of it. The first draft is not what gets approved.
+- **Wait for explicit approval.** Do not proceed to implementation without it.
+- If the user wants changes, adjust the plan; on a substantial change run the review **again**
+  (a new agent, not a continuation of the old one).
 
-### 4. Implementace
-- Implementuj minimální změnu řešící zadání podle odsouhlaseného plánu. Žádné neporadené refaktoringy ani spekulativní abstrakce.
-- Pokud jde o UI změnu, ověř ji v prohlížeči (dev server + manuální průchod).
+### 4. Implementation
+- Implement the minimal change that solves the task, following the approved plan. No
+  unrequested refactoring and no speculative abstractions.
+- For a UI change, verify it in the browser (dev server + a manual pass).
 
-### 5. E2E testy (Playwright)
-- **Skip celý krok pokud:**
-  - projekt nemá nastavené E2E testy (žádný `tests/e2e/`, žádný `playwright.config.*`, žádný skript `test:e2e` v `package.json`), **nebo**
-  - jde o triviální opravu (překlep, jednořádková úprava, change copy, drobná oprava stylu, dokumentace).
-- Jinak: pokud změna **lze otestovat přes UI**, napiš/aktualizuj test v `tests/e2e/` pokrývající zlatou cestu.
-- Spusť `npm run test:e2e` a oprav dokud neprojde.
-- Pokud změna **nelze rozumně otestovat přes UI** (čistě tooling, infra, dokumentace), zeptej se uživatele, jestli krok přeskočit.
+### 5. E2E tests
+- **Skip the whole step if:**
+  - the project has no E2E setup (no e2e test directory, no runner config such as
+    `playwright.config.*` / `cypress.config.*`, no e2e script in the project's manifest), **or**
+  - this is a trivial fix (typo, one-line change, copy change, minor style fix, documentation).
+- Otherwise: if the change **can be tested through the UI**, write or update a test covering
+  the golden path, in the project's existing e2e location and style.
+- Run the project's own e2e command and fix until it passes.
+- If the change **cannot reasonably be tested through the UI** (pure tooling, infra,
+  documentation), ask the user whether to skip the step.
 
-### 6. Lint & formát — izolovaný subagent
-- Spusť `feature:linter` (`baseBranch`, `branch`). Formátuje a lintuje **jen soubory z diffu**,
-  opravuje mechaniky a vrací krátký report — stovky řádků výstupu z nástrojů zůstanou u něj.
-- Zadání mu neposílej. Na mechanický úklid ho nepotřebuje a nemá se čím nechat ovlivnit.
-- Co ti vrátí v sekci **Zbývá autorovi**, oprav sám — to jsou přesně ty chyby, u kterých je
-  potřeba znát záměr. Pak pusť linter znovu, nebo si sám ověř `npm run lint` a `npm run tsc`.
-- Krok **skipni**, pokud projekt nemá ani formatter, ani linter, ani typecheck.
+### 6. Lint & format — isolated subagent
+- Launch `feature:linter` (`baseBranch`, `branch`). It formats and lints **only the files in
+  the diff**, fixes the mechanical parts and returns a short report — hundreds of lines of tool
+  output stay with it.
+- Do not send it the task. It does not need one for mechanical cleanup and has nothing to be
+  swayed by.
+- Whatever it returns under **Left for the author** you fix yourself — those are exactly the
+  errors where knowing the intent matters. Then run the linter again, or verify the project's
+  lint and typecheck commands yourself.
+- **Skip** the step if the project has no formatter, no linter and no typecheck.
 
-### 7. Review kódu — izolovaný subagent
-Reviewera pouštěj až na uklizený kód, ať nálezy nejsou o formátování.
+### 7. Code review — isolated subagent
+Only run the reviewer on cleaned-up code, so the findings are not about formatting.
 
-Spusť `feature:reviewer` (correctness + simplify optika). Prompt obsahuje **jen** tohle:
-- `baseBranch` (`develop`) a `branch`
-- **zadání** potvrzené v kroku 1 a **odsouhlasený plán** z kroku 3
-- pokyn, že diff si vytáhne sám: `git diff <baseBranch>...HEAD`
+Launch `feature:reviewer` (correctness + simplify lens). The prompt contains **only** this:
+- `baseBranch` and `branch`
+- the **task** confirmed in step 1 and the **approved plan** from step 3
+- the instruction that it pulls its own diff: `git diff <baseBranch>...HEAD`
 
-Do promptu **nepatří**: co jsi zkoušel a zahodil, proč jsi něco udělal takhle, co už
-uživatel odsouhlasil, ani tvoje shrnutí implementace. Kdyby to znal, jen ti to potvrdí.
+What does **not** belong in the prompt: what you tried and discarded, why you did something
+this way, what the user already approved, or your summary of the implementation. Knowing that,
+it would only confirm you.
 
-Bezpečnost tady **neřeš** — ta jde až v kroku 10, aby viděla i dokumentaci.
+**Do not handle security here** — that comes in step 10, so it sees the documentation too.
 
-### 8. Opravy nálezů (hlavní kontext)
-- Nálezy **roztřiď**: co opravíš, co je falešný poplach (napiš proč), co je mimo zadání
-  (patří do ticketu, ne do téhle branche).
-- Oprav `blocker` a `major`. `minor` podle úsudku.
-- Po opravách znovu `npm run test:e2e` (pokud krok 5 nebyl skipnutý). Lint a typecheck si
-  ověř sám; když se toho nasypalo hodně, pusť radši znovu `feature:linter`.
-- Když reviewer vrátil `CHANGES` a ty s podstatnou částí nesouhlasíš, nehádej se s ním
-  v dalším kole — vezmi to do kroku 12 jako otázku pro uživatele.
+### 8. Fixing the findings (main context)
+- **Triage** the findings: what you will fix, what is a false alarm (say why), what is out of
+  scope (belongs in a ticket, not in this branch).
+- Fix `blocker` and `major`. `minor` at your discretion.
+- After the fixes, run the e2e command again (if step 5 was not skipped). Verify lint and
+  typecheck yourself; if a lot piled up, rerun `feature:linter` instead.
+- If the reviewer returned `CHANGES` and you disagree with a substantial part of it, do not
+  argue with it in another round — take it to step 11 as a question for the user.
 
-### 9. Dokumentace — izolovaný subagent
-- Spusť `feature:doc-writer` (`baseBranch`, `branch`, zadání). Vidí hotový kód, ne cestu k němu.
-- Běží **až po opravách**, aby nedokumentoval stav, který se ještě změní.
-- **Skipni ho**, pokud jde o triviální změnu (překlep, copy, styl, čistě interní refaktoring
-  beze změny chování) — jen napiš uživateli proč.
-- Doc-writer si sám vyhodnotí wiki (`/feature:wiki`), CHANGELOG i `docs/**`. Jeho report
-  ukaž uživateli v kroku 12 — nepřepisuj ho po něm.
+### 9. Documentation — isolated subagent
+- Launch `feature:doc-writer` (`baseBranch`, `branch`, task). It sees the finished code, not
+  the road to it.
+- Runs **after the fixes**, so it does not document a state that is still going to change.
+- **Skip it** for a trivial change (typo, copy, style, purely internal refactoring with no
+  behavior change) — just tell the user why.
+- The doc-writer decides for itself about the wiki (`/feature:wiki`), the CHANGELOG and
+  `docs/**`. Show its report to the user in step 11 — do not rewrite it afterwards.
 
-### 10. Bezpečnost — izolovaný subagent, úplně na konci
-Až tady, protože teď je diff **kompletní včetně dokumentace** — a docs jsou plnohodnotná
-security plocha: příklady s tokenem, ENV hodnoty, interní URL, instrukce, podle které si
-čtenář vypne kontrolu nebo si commitne `.env`.
+### 10. Security — isolated subagent, dead last
+Here, because now the diff is **complete including documentation** — and docs are a full
+security surface: examples with a token, ENV values, internal URLs, an instruction that has the
+reader disable a check or commit their `.env`.
 
-- Spusť `feature:security-reviewer` — předej **jen** `baseBranch` a `branch`. Zadání ne:
-  je to solo kontrola, která nemá řešit, co feature měla dělat, a diff si vytáhne sama,
-  takže vidí kód po opravách i to, co zapsal doc-writer.
-- **Skipni ho** jen když se security plochy nedotýká **ani kód, ani dokumentace** — jen
-  napiš uživateli proč.
-- Nálezy oprav v hlavním kontextu, stejnou triáží jako v kroku 8: `critical` a `high` vždy,
-  `medium` a `low` podle úsudku.
-- Když se oprava dotkla dokumentace, pusť **znovu `feature:doc-writer`**, ne ruční záplatu —
-  docs má na starosti on.
-- Když jsi na security nálezy sahal do kódu podstatně, pusť `feature:security-reviewer`
-  **ještě raz** s čistým kontextem. Hodnotí se výsledný diff, ne ten, který mu přišel poprvé.
+- Launch `feature:security-reviewer` — pass **only** `baseBranch` and `branch`. Not the task:
+  this is a solo check that should not be reasoning about what the feature was meant to do, and
+  it pulls its own diff, so it sees the code after the fixes as well as what the doc-writer wrote.
+- **Skip it** only when **neither the code nor the documentation** touches a security surface —
+  just tell the user why.
+- Fix the findings in the main context, with the same triage as step 8: `critical` and `high`
+  always, `medium` and `low` at your discretion.
+- If a fix touched documentation, rerun **`feature:doc-writer`** rather than hand-patching —
+  docs are its job.
+- If you reached into the code substantially over the security findings, run
+  `feature:security-reviewer` **once more** with a clean context. What gets judged is the
+  resulting diff, not the one it first received.
 
-### 11. Konzultace
-- Shrň uživateli:
-  - co bylo implementováno (stručně, bez výpisu souborů)
-  - nové/upravené testy
-  - výsledky review a bezpečnosti: oba verdikty + co jsi z nálezů opravil a co ne (a proč)
-  - co zapsal doc-writer
-  - co jsi nedělal a proč (pokud to stojí za zmínku)
-- **Počkej** na zpětnou vazbu. Pokud má uživatel připomínky, oprav je a vrať se na krok 6
-  (úklid) a projdi kontrolní kroky znovu, včetně bezpečnosti —
-  reviewery pouštěj vždy **znovu s čistým kontextem**, ne pokračováním předchozího agenta.
+### 11. Consultation
+- Summarize for the user:
+  - what was implemented (briefly, no file listing)
+  - new/updated tests
+  - review and security results: both verdicts + which findings you fixed and which not (and why)
+  - what the doc-writer wrote
+  - what you did not do and why (if it is worth mentioning)
+- **Wait** for feedback. If the user has comments, fix them and go back to step 6 (cleanup) and
+  through the checking steps again, security included — always run the reviewers **again with a
+  clean context**, never as a continuation of the previous agent.
 
 ### 12. Commit & PR
-- **Necommituj sám.** Připomeň uživateli command `/feature:commit` (vytvoří českou commit message bez emoji a bez Co-Authored-By).
-- Po commitu se zeptej jestli pushnout branch. Pokud ano:
+- **Do not commit yourself.** Remind the user of the `/feature:commit` command.
+- After the commit, ask whether to push the branch. If yes:
   - `git push -u origin <branch>`
-  - Z `git remote get-url origin` odvoď hostera a vygeneruj URL pro vytvoření PR do `develop` (Bitbucket Server, GitHub, GitLab — podle URL). Tu URL **jen ukaž uživateli** — PR si vytvoří sám.
-  - **Nepoužívej `gh` ani jiné CLI pro vytváření PR.** PR vždy vytváří uživatel ručně přes vygenerovaný odkaz.
+  - Derive the host from `git remote get-url origin` and generate the URL for opening a PR
+    against `<baseBranch>` (Bitbucket Server, GitHub, GitLab — depending on the URL). **Only
+    show** that URL to the user — they create the PR themselves.
+  - **Do not use `gh` or any other CLI to create PRs.** The PR is always created by the user
+    through the generated link.
 
-## Pravidla
+## Rules
 
-- **Nikdy** necommituj, nepushuj ani nevytvářej PR bez výslovného souhlasu uživatele.
-- **Nikdy** `git add -A` ani `.` — vždy konkrétní soubory.
-- **Nikdy** `--no-verify`, `--amend`, `reset --hard`, force push.
-- Branch vždy z aktuálního `develop`, ne z `main` ani z jiné feature.
-- Pokud E2E test selže opakovaně z důvodu mimo zadání (existující bug), zastav se a zeptej.
-- Komunikace s uživatelem česky. Kde jsi v postupu, hlas krátce v odpovědi — žádný
-  stavový soubor se nikam nezapisuje.
-- Kontrolní agenty (linter, reviewery, doc-writer) spouštěj **vždy jako nový subagent** s čistým kontextem. Nikdy jim
-  neposílej průběh vývoje ani je nenech pokračovat v už rozjeté konverzaci — izolace kontextu
-  je celý důvod, proč jsou to subagenti.
+- **Never** commit, push or create a PR without the user's explicit approval.
+- **Never** `git add -A` or `.` — always specific files.
+- **Never** `--no-verify`, `--amend`, `reset --hard`, force push.
+- Always branch from a fresh `baseBranch`, not from another feature branch.
+- If an E2E test fails repeatedly for a reason outside the task (a pre-existing bug), stop and ask.
+- **Talk to the user in the language they write in.** These instructions are in English; the
+  conversation does not have to be. Report where you are in the process briefly in your reply —
+  no state file gets written anywhere.
+- Always launch the checking agents (linter, reviewers, doc-writer) **as a new subagent** with a
+  clean context. Never send them the course of development and never let them continue an
+  already running conversation — context isolation is the entire reason they are subagents.
