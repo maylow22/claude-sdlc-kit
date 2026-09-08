@@ -27,7 +27,7 @@ Jádro workflow drží **hlavní agent**, protože potřebuje jednu nit od zadá
 | 6 Lint & formát | `feature:linter` (čistý kontext) |
 | 7 Review kódu | `feature:reviewer` (čistý kontext) |
 | 8 Opravy nálezů | hlavní kontext |
-| 9 Dokumentace | `feature:doc-writer` (čistý kontext) |
+| 9 Dokumentace | `feature:doc-writer` (čistý kontext) 
 | 10 Bezpečnost | `feature:security-reviewer` (čistý kontext, vidí i docs) |
 | 11 Konzultace · 12 Commit & PR | hlavní kontext |
 
