@@ -13,6 +13,13 @@
       "author": { "name": "Miloslav Marel" },
       "category": "productivity",
       "source": "./plugins/claude-monitor"
+    },
+    {
+      "name": "feature",
+      "description": "Workflow pro vývoj feature — branch, plán, implementace, E2E, review, commit, wiki. Hlásí průběh do claude-monitoru.",
+      "author": { "name": "Miloslav Marel" },
+      "category": "workflow",
+      "source": "./plugins/feature"
     }
   ]
 }

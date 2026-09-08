@@ -10,15 +10,17 @@ instalují a aktualizují přes `claude plugin`.
 claude plugin marketplace add ~/Workspace/claude-kit     # lokálně
 # nebo po pushnutí:  claude plugin marketplace add maylow22/claude-kit
 claude plugin install claude-monitor@claude-kit
+claude plugin install feature@claude-kit
 ```
 
-Restart Claude Code (nebo `/reload-plugins`) a pak `/claude-monitor:start`.
+Restart Claude Code (nebo `/reload-plugins`) a pak `/claude-monitor:start`, `/feature:start`.
 
 ## Pluginy
 
 | Plugin | Co dělá |
 |---|---|
 | [claude-monitor](plugins/claude-monitor) | Live dashboard všech sessions — stav, tokeny, kontext, subagenti, průběh workflow |
+| [feature](plugins/feature) | `/feature:start` workflow — vývoj a E2E v hlavním kontextu, lint/review/bezpečnost/docs v izolovaných subagentech; plus `/feature:commit`, `/feature:wiki` |
 
 ## Vývoj
 

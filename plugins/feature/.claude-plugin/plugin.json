@@ -1,0 +1,11 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "feature",
+  "version": "0.1.0",
+  "description": "Workflow pro vývoj feature — branch, plán, implementace, E2E, review, commit, wiki. Hlásí průběh do claude-monitoru.",
+  "author": {
+    "name": "Miloslav Marel",
+    "email": "miloslav.marel@gem.cz"
+  },
+  "keywords": ["workflow", "git", "jira", "review", "commit", "wiki"]
+}

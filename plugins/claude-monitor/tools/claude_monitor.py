@@ -23,6 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 PROJECTS = Path.home() / ".claude" / "projects"
+CONFIG = Path.home() / ".claude.json"
 FLOWS = Path.home() / ".claude" / "flow"  # <sessionId>.json zapisuje sam agent
 SUBAGENT_ACTIVE_SEC = 60
 
@@ -35,7 +36,12 @@ CONTEXT_LIMITS = {
 }
 DEFAULT_LIMIT = 1_000_000
 
+# Kolonky z ~/.claude.json -> cachedUsageUtilization.utilization.limits
+LIMIT_LABELS = {"session": "session (5 h)", "weekly_all": "tyden celkem",
+                "weekly_scoped": "tyden"}
+
 _cache: dict[str, dict] = {}
+_usage: dict = {"mtime": 0.0, "data": None}
 _lock = threading.Lock()
 
 
@@ -150,9 +156,55 @@ def subagents(transcript_path: str, session_id: str) -> list[dict]:
     return out
 
 
+def _parse_usage() -> dict | None:
+    try:
+        raw = json.loads(CONFIG.read_text())
+    except (OSError, ValueError):
+        return None
+    cu = raw.get("cachedUsageUtilization") or {}
+    limits = []
+    for lim in (cu.get("utilization") or {}).get("limits") or []:
+        if not isinstance(lim, dict):
+            continue
+        kind = str(lim.get("kind") or "?")
+        label = LIMIT_LABELS.get(kind, kind)
+        model = ((lim.get("scope") or {}).get("model") or {}).get("display_name")
+        limits.append(
+            {
+                "label": f"{label} {model}" if model else label,
+                "percent": lim.get("percent") or 0,
+                "severity": lim.get("severity") or "normal",
+                "resetsAt": lim.get("resets_at"),
+                "active": bool(lim.get("is_active")),
+            }
+        )
+    if not limits:
+        return None
+    tier = (raw.get("oauthAccount") or {}).get("userRateLimitTier") or ""
+    return {
+        "plan": tier.replace("default_", "").replace("claude_", "").replace("_", " "),
+        "fetchedAt": (cu.get("fetchedAtMs") or 0) / 1000,
+        "limits": limits,
+    }
+
+
+def read_usage() -> dict | None:
+    """Vyuziti planu (to, co ukazuje /usage). Claude Code si ho cachuje do
+    ~/.claude.json; vlastni dotaz na API nedelame, takze cislo je jen tak
+    cerstve, jak cerstva je cache - proto se posila i fetchedAt."""
+    try:
+        mtime = os.stat(CONFIG).st_mtime
+    except OSError:
+        return None
+    if _usage["mtime"] != mtime:
+        _usage["mtime"] = mtime
+        _usage["data"] = _parse_usage()
+    return _usage["data"]
+
+
 def read_flow(session_id: str) -> dict | None:
     """Volitelny postup workflow, ktery si session sama zapisuje do
-    ~/.claude/flow/<sessionId>.json  (viz kontrakt v git-feature.md)."""
+    ~/.claude/flow/<sessionId>.json  (kontrakt viz plugin feature, /feature:start)."""
     f = FLOWS / f"{session_id}.json"
     try:
         d = json.loads(f.read_text())
@@ -256,7 +308,12 @@ def build_state() -> dict:
         "cache_read": sum(s["tokens"]["cache_read"] for s in sessions),
         "context": sum(s["context"] for s in sessions),
     }
-    return {"now": time.time(), "sessions": sessions, "totals": totals}
+    return {
+        "now": time.time(),
+        "usage": read_usage(),
+        "sessions": sessions,
+        "totals": totals,
+    }
 
 
 PAGE = r"""<!doctype html>
@@ -270,6 +327,15 @@ body{margin:0;padding:18px;background:var(--bg);color:var(--fg);
 h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .sub{color:var(--dim);font-size:12px;margin-bottom:16px}
 .kpis{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.cockpit{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.lim{background:var(--card);border:1px solid var(--line);border-radius:8px;
+     padding:8px 12px;flex:1 1 190px;min-width:170px}
+.lim.on{border-color:var(--busy)}
+.lim .t{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--dim)}
+.lim .t b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
+.lim .r{font-size:11px;color:var(--dim)}
+.lim.hot>.bar>i{background:var(--warn)}
+.lim.max>.bar>i{background:#f2776b}
 .kpi{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
 .kpi b{display:block;font-size:19px;font-variant-numeric:tabular-nums}
 .kpi span{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
@@ -310,15 +376,32 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 </style>
 <h1>Claude agents na tomhle Macu</h1>
 <div class="sub" id="sub">nacitam…</div>
+<div class="cockpit" id="cockpit"></div>
 <div class="kpis" id="kpis"></div>
 <div class="grid" id="grid"></div>
 <script>
 const n = v => v >= 1e6 ? (v/1e6).toFixed(2)+"M" : v >= 1e3 ? Math.round(v/1e3)+"k" : String(v||0);
-const ago = (t, now) => { const s = Math.max(0, now - t);
-  return s < 60 ? Math.round(s)+" s" : s < 3600 ? Math.round(s/60)+" min" : (s/3600).toFixed(1)+" h"; };
+const dur = s => s < 60 ? Math.round(s)+" s" : s < 3600 ? Math.round(s/60)+" min"
+  : s < 86400 ? (s/3600).toFixed(1)+" h" : (s/86400).toFixed(1)+" d";
+const ago = (t, now) => dur(Math.max(0, now - t));
 const esc = s => (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 
 function kpi(v, l){ return `<div class="kpi"><b>${v}</b><span>${l}</span></div>`; }
+
+function cockpit(u, now){
+  if(!u) return "";
+  return u.limits.map(l => {
+    const p = Math.max(0, Math.min(100, l.percent));
+    const cls = (p >= 90 || l.severity === "critical") ? "max"
+              : (p >= 70 || l.severity === "warning") ? "hot" : "";
+    const reset = l.resetsAt
+      ? "reset za " + dur(Math.max(0, Date.parse(l.resetsAt)/1000 - now)) : "&nbsp;";
+    return `<div class="lim ${cls} ${l.active ? "on" : ""}">
+      <div class="t"><span>${esc(l.label)}</span><b>${l.percent} %</b></div>
+      <div class="bar"><i style="width:${p}%"></i></div>
+      <div class="r">${reset}</div></div>`;
+  }).join("");
+}
 
 function flowHtml(f){
   if(!f) return "";
@@ -367,8 +450,12 @@ async function tick(){
   try {
     const d = await (await fetch("/api/state")).json();
     const T = d.totals, now = d.now;
+    const U = d.usage;
     document.getElementById("sub").textContent =
-      "obnoveno " + new Date().toLocaleTimeString("cs-CZ") + " · auto-refresh 3 s";
+      "obnoveno " + new Date().toLocaleTimeString("cs-CZ") + " · auto-refresh 3 s"
+      + (U ? " · plan " + U.plan + " · usage z cache Claude Code, stara "
+             + ago(U.fetchedAt, now) : "");
+    document.getElementById("cockpit").innerHTML = cockpit(U, now);
     document.getElementById("kpis").innerHTML =
       kpi(T.sessions, "sessions") + kpi(T.busy, "busy") + kpi(T.blocked, "blocked")
       + kpi(T.subagents, "subagentu") + kpi(n(T.context), "kontext celkem")
