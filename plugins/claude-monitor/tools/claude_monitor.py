@@ -410,7 +410,8 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .kpis:not(.all) .kpi.more-only{display:none}
 .more{background:none;border:1px dashed var(--line);border-radius:8px;color:var(--dim);
       padding:8px 12px;font:inherit;font-size:11px;text-transform:uppercase;
-      letter-spacing:.04em;cursor:pointer}
+      letter-spacing:.04em;cursor:pointer;text-align:center}
+.more i{display:block;font-size:19px;font-style:normal;line-height:1}
 .more:hover{border-color:var(--dim);color:var(--fg)}
 .kpi b{display:block;font-size:19px;font-variant-numeric:tabular-nums}
 .kpi span{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
@@ -503,7 +504,10 @@ function paintKpiFold(){
   const el = document.getElementById("kpis");
   el.classList.toggle("all", kpisAll);
   const b = el.querySelector(".more");
-  if(b) b.textContent = kpisAll ? "show less" : "show more";
+  if(b){
+    b.querySelector("i").textContent = kpisAll ? "\u2190" : "\u2192";
+    b.querySelector("span").textContent = kpisAll ? "show less" : "show more";
+  }
 }
 
 // share of the input side served from the cache - what keeps a long session cheap
@@ -599,7 +603,7 @@ async function tick(){
       + kpi(n(T.cache_read), "cache read", "more-only")
       + kpi(n(T.cache_write), "cache write", "more-only")
       + (U ? kpi(esc(U.plan), "plan", "more-only") : "")
-      + `<button class="more" onclick="toggleKpis()">show more</button>`;
+      + `<button class="more" onclick="toggleKpis()"><i>\u2192</i><span>show more</span></button>`;
     paintKpiFold();
     document.getElementById("grid").innerHTML = d.sessions.map(s => card(s, now)).join("");
     document.title = (T.waiting ? `(${T.waiting}) ` : "") + "Claude agents";
