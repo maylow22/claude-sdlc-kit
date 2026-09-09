@@ -1,4 +1,4 @@
-# claude-kit
+# claude-sdlc-kit
 
 A marketplace of personal plugins for [Claude Code](https://claude.com/claude-code) —
 a live dashboard of running sessions, and a workflow that takes a feature from the task to
