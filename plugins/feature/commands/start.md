@@ -1,6 +1,6 @@
 ---
 description: Runs the workflow for a new feature — branch, plan, implementation and E2E in the main context; plan review, lint, code review, security and docs in isolated subagents
-argument-hint: <issue key | issue URL | task description>
+argument-hint: <issue key | issue URL | task description> [--fast | --full]
 ---
 
 Workflow for developing a new feature. The argument is required — either an **issue key**
@@ -8,6 +8,10 @@ Workflow for developing a new feature. The argument is required — either an **
 **free-form description** of the task.
 
 If the argument is missing, **ask** the user what to implement — do not continue without it.
+
+Optional flags: **`--fast`** pre-sets the short composition of steps, **`--full`** the whole
+workflow. Neither decides anything on its own — the composition is confirmed at the gate in
+step 3 together with the plan.
 
 ## How the context is split
 
@@ -30,6 +34,34 @@ If the argument is missing, **ask** the user what to implement — do not contin
 - Mechanical cleanup (formatter, lint, typecheck) is a subagent as well — its output tends to
   be the longest and least interesting thing in the whole workflow, so keep it out of the main
   context.
+
+## The composition of steps (fast track)
+
+A typo and a new endpoint do not deserve the same workflow. So the set of steps is not fixed:
+in step 3 you propose, **together with the plan**, which of the checking steps actually run, and
+the user confirms the composition at the same gate that approves the plan. One gate, two things
+approved.
+
+- **Always run, never up for discussion:** 1 task, 2 branch, 3 plan **including its review**,
+  4 implementation, 6 lint, 11 consultation, 12 commit & PR. The review is what makes the plan
+  worth approving, and mechanical cleanup is cheap enough not to be worth negotiating.
+- **Up for the composition:** 5 E2E, 7 + 8 code review and its fixes, 9 documentation,
+  10 security.
+
+**Propose dropping a step only when all of this holds:**
+- the change is small and local — a handful of files, no new module, no new dependency;
+- there is no behavior a test would guard: copy, styling, a constant, a log message, comments,
+  dead code, a version bump, renaming a local symbol;
+- it touches no data model, no API contract, no migration;
+- nothing the documentation describes changes for the user.
+
+**Never dropped, whatever the flags say** — if the change touches authentication, authorization
+or permissions · secrets, credentials or crypto · handling of untrusted input · file upload · a
+new or changed endpoint · dependencies · migrations · payments · CI/CD, release or deploy
+scripts. With `--fast` and one of these present, **name the disqualifier and ask** rather than
+obeying.
+
+Never skip a step silently and never skip one that was not in the table at the gate.
 
 ## Steps
 
@@ -57,7 +89,7 @@ If the argument is missing, **ask** the user what to implement — do not contin
   `feature/<slug>`. If the repo's history uses a different branch naming convention, follow
   that one instead.
 
-### 3. The plan (and its review, before the user sees it)
+### 3. The plan, its review — and the gate over the composition of steps
 - Put together an **implementation plan** — brief steps (what/where/how), key files, risks.
   Write it to `.claude/plans/<branch-slug>.md` so both the review and the user have something
   to read.
@@ -70,17 +102,40 @@ If the argument is missing, **ask** the user what to implement — do not contin
   out and why).
 - Present the user **only the reviewed plan** plus three lines on what the review found and
   what changed in the plan because of it. The first draft is not what gets approved.
-- **Wait for explicit approval.** Do not proceed to implementation without it.
+- Right under it, propose the **composition of steps** (see the section above): a short table
+  of step · run/skip · a one-line reason, and the resulting track — `FULL` or `FAST`. `--fast`
+  and `--full` from the argument only pre-set the proposal; they do not replace the
+  confirmation, and they do not override the disqualifiers.
+- **Wait for explicit approval — of the plan and of the composition.** Ask with
+  `AskUserQuestion`; the default answer is **one click on your own proposal**:
+  - **✅ Approve the plan and the composition** — put the proposal itself in the `description`
+    (`E2E skip · review skip · docs skip · security run`), so approving means not having to
+    tick anything.
+  - **🐢 Approve the plan, run the whole workflow** — the escape hatch to the full track.
+  - **☑️ Approve the plan, adjust the steps** — only this one opens the checkbox list below.
+  - Objections to the plan itself go through "Other".
+- **The checkbox list** (only when the user picked "adjust the steps"): a second
+  `AskUserQuestion` with `multiSelect: true`, one option per optional step — E2E · code review ·
+  documentation · security. **What the user checks runs, what stays unchecked is dropped.** Put
+  your recommendation in each label (`E2E — proposed: skip`) and the reason in the
+  `description`. The tool **cannot pre-tick boxes**, which is exactly why the proposal is the
+  one-click option above and the list is only the detour — do not open it by default.
 - If the user wants changes, adjust the plan; on a substantial change run the review **again**
-  (a new agent, not a continuation of the old one).
+  (a new agent, not a continuation of the old one) — and propose the composition again, because
+  a bigger plan may deserve more steps.
 
 ### 4. Implementation
 - Implement the minimal change that solves the task, following the approved plan. No
   unrequested refactoring and no speculative abstractions.
 - For a UI change, verify it in the browser (dev server + a manual pass).
+- **Then check the agreed composition against the real diff.** It was proposed over the plan,
+  not over the code. If the diff came out substantially bigger than the plan assumed, or it
+  touches one of the disqualifiers, **put the dropped step back** and say so in one line.
+  Putting a step back needs no approval — only dropping one does.
 
 ### 5. E2E tests
 - **Skip the whole step if:**
+  - the composition agreed at the gate dropped it, **or**
   - the project has no E2E setup (no e2e test directory, no runner config such as
     `playwright.config.*` / `cypress.config.*`, no e2e script in the project's manifest), **or**
   - this is a trivial fix (typo, one-line change, copy change, minor style fix, documentation).
@@ -102,7 +157,9 @@ If the argument is missing, **ask** the user what to implement — do not contin
 - **Skip** the step if the project has no formatter, no linter and no typecheck.
 
 ### 7. Code review — isolated subagent
-Only run the reviewer on cleaned-up code, so the findings are not about formatting.
+**Skip** the step if the composition agreed at the gate dropped it — then step 8 has nothing to
+triage either. Otherwise only run the reviewer on cleaned-up code, so the findings are not about
+formatting.
 
 Launch `feature:reviewer` (correctness + simplify lens). The prompt contains **only** this:
 - `baseBranch` and `branch`
@@ -128,8 +185,8 @@ it would only confirm you.
 - Launch `feature:doc-writer` (`baseBranch`, `branch`, task). It sees the finished code, not
   the road to it.
 - Runs **after the fixes**, so it does not document a state that is still going to change.
-- **Skip it** for a trivial change (typo, copy, style, purely internal refactoring with no
-  behavior change) — just tell the user why.
+- **Skip it** if the composition agreed at the gate dropped it, or for a trivial change (typo,
+  copy, style, purely internal refactoring with no behavior change) — just tell the user why.
 - The doc-writer decides for itself about the wiki (`/feature:wiki`), the CHANGELOG and
   `docs/**`. Show its report to the user in step 11 — do not rewrite it afterwards.
 
@@ -141,8 +198,10 @@ reader disable a check or commit their `.env`.
 - Launch `feature:security-reviewer` — pass **only** `baseBranch` and `branch`. Not the task:
   this is a solo check that should not be reasoning about what the feature was meant to do, and
   it pulls its own diff, so it sees the code after the fixes as well as what the doc-writer wrote.
-- **Skip it** only when **neither the code nor the documentation** touches a security surface —
-  just tell the user why.
+- **Skip it** only when the composition agreed at the gate dropped it, or when **neither the
+  code nor the documentation** touches a security surface — just tell the user why. The
+  disqualifier list guards both: a diff that reaches a security surface gets this step back
+  even if the gate dropped it.
 - Fix the findings in the main context, with the same triage as step 8: `critical` and `high`
   always, `medium` and `low` at your discretion.
 - If a fix touched documentation, rerun **`feature:doc-writer`** rather than hand-patching —
@@ -156,11 +215,14 @@ reader disable a check or commit their `.env`.
   - what was implemented (briefly, no file listing)
   - new/updated tests
   - review and security results: both verdicts + which findings you fixed and which not (and why)
+  - **which steps the composition dropped** and why, one line each — plus any you put back after
+    seeing the diff
   - what the doc-writer wrote
   - what you did not do and why (if it is worth mentioning)
 - **Wait** for feedback. If the user has comments, fix them and go back to step 6 (cleanup) and
-  through the checking steps again, security included — always run the reviewers **again with a
-  clean context**, never as a continuation of the previous agent.
+  through the checking steps of the agreed composition again, security included — always run the
+  reviewers **again with a clean context**, never as a continuation of the previous agent. If the
+  fixes grew the change beyond what the gate assumed, put the dropped steps back (step 4 rule).
 
 ### 12. Commit & PR
 - **Do not commit yourself.** Remind the user of the `/feature:commit` command.
@@ -182,6 +244,8 @@ reader disable a check or commit their `.env`.
 - **Talk to the user in the language they write in.** These instructions are in English; the
   conversation does not have to be. Report where you are in the process briefly in your reply —
   no state file gets written anywhere.
+- A step is only ever dropped by a composition **agreed at the gate**, never silently in the
+  moment — and never one on the disqualifier list.
 - Always launch the checking agents (linter, reviewers, doc-writer) **as a new subagent** with a
   clean context. Never send them the course of development and never let them continue an
   already running conversation — context isolation is the entire reason they are subagents.

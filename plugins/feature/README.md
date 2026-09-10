@@ -6,7 +6,7 @@ subagents in [claude-monitor](../claude-monitor).
 
 | Command | What it does |
 |---|---|
-| `/feature:start <issue key \| URL \| description>` | the whole run: task → branch → plan → implementation → E2E → lint → review → fixes → docs → consultation → commit & PR |
+| `/feature:start <issue key \| URL \| description> [--fast\|--full]` | the whole run: task → branch → plan → implementation → E2E → lint → review → fixes → docs → consultation → commit & PR. Which of the checking steps actually run is decided at the plan gate |
 | `/feature:plan-review [path to plan]` | adversarial review of the plan against the real code, before anything gets written |
 | `/feature:commit` | git commit, no emoji and no Co-Authored-By, in the language of the repo's history |
 | `/feature:wiki [--scope=full\|incremental]` | the project wiki in `docs/wiki/` following the LLM-wiki pattern — discovers the stack itself |
@@ -69,11 +69,34 @@ subagents.
 | `feature:security-reviewer` | branch + diff only (code **and** docs) | read-only + Skill | verdict + findings with a path to exploitation |
 | `feature:doc-writer` | task, diff | + Write/Edit | what it wrote, what it did not and why, wiki status |
 
+## The composition of steps
+
+A typo and a new endpoint do not deserve the same workflow, so the set of steps is not fixed.
+Together with the reviewed plan, `/feature:start` proposes at the **gate in step 3** which of
+the checking steps will run — a table of step · run/skip · reason — and the user approves the
+plan and the composition in **one click on the proposal**. The full track is the second option,
+and only the third one ("adjust the steps") opens a checkbox list of the four optional steps,
+where what is ticked runs. The dialog cannot come pre-ticked, so the pre-filled answer is the
+first option, not a checked box.
+
+Up for the composition are **E2E, code review, documentation and security**. The task, the
+branch, the plan **including its review**, the implementation, lint, the consultation and the
+commit always run. `--fast` and `--full` only pre-set the proposal; the confirmation still
+happens at the gate.
+
+A step is never dropped when the change touches authentication, authorization or permissions,
+secrets, credentials or crypto, untrusted input, file upload, a new or changed endpoint,
+dependencies, migrations, payments, or CI/CD and release scripts — with `--fast` the workflow
+names the disqualifier and asks instead of obeying. And because the composition is proposed over
+the plan rather than the diff, it gets re-checked once the code is written: a change that came
+out bigger than planned gets the dropped steps back, which needs no approval — only dropping
+one does.
+
 ## The gates that wait for you
 
-The task, the **reviewed** plan, the consultation, commit & push. Without explicit approval the
-workflow does not commit, does not push and does not create a PR (the PR is only generated as a
-link — `gh` is not used).
+The task, the **reviewed** plan together with the composition of steps, the consultation,
+commit & push. Without explicit approval the workflow does not commit, does not push and does
+not create a PR (the PR is only generated as a link — `gh` is not used).
 
 ## What it discovers, and what it does not
 

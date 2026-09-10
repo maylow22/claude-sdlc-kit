@@ -33,7 +33,7 @@ Restart Claude Code (or `/reload-plugins`), then `/claude-monitor:start`, `/feat
 | Plugin | What it does |
 |---|---|
 | [claude-monitor](plugins/claude-monitor) | Live dashboard of every session on the machine — plan utilization, status, tokens, context occupancy, subagent tree. Starts itself at session start, serves on `http://127.0.0.1:8787/`. |
-| [feature](plugins/feature) | `/feature:start` — the whole run of a feature: task → branch → plan → implementation → E2E → lint → review → docs → security → commit & PR. Plus standalone `/feature:plan-review`, `/feature:commit`, `/feature:wiki`. |
+| [feature](plugins/feature) | `/feature:start` — the whole run of a feature: task → branch → plan → implementation → E2E → lint → review → docs → security → commit & PR. Which of the checking steps run is proposed per change and approved at the plan gate (`--fast`/`--full`). Plus standalone `/feature:plan-review`, `/feature:commit`, `/feature:wiki`. |
 
 The details (what the dashboard reads, how the workflow is split between the main context and
 the subagents) are in each plugin's README.
