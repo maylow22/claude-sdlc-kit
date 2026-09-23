@@ -8,6 +8,7 @@ Data sources:
   - ~/.claude/projects/*/<sid>.jsonl -> tokens, model, effort, git branch, activity
   - .../<sid>/subagents/agent-*      -> subagent tree (agentType, spawnDepth, tokens)
   - ~/.claude/monitor/notify/*.json  -> Notification hook: session is waiting on the user
+  - every transcript under projects/  -> the statistics view: tokens per project per day
 
 Nothing is registered at start-up and no state is kept between requests: every /api/state
 re-reads all of the above, so a session older than the server appears on the next poll
@@ -20,6 +21,7 @@ Run:  python3 claude_monitor.py [--port 8787] [--open]
 from __future__ import annotations
 
 import argparse
+import calendar
 import glob
 import json
 import os
@@ -74,8 +76,9 @@ DEFAULT_LIMIT = 1_000_000
 # Fields from ~/.claude.json -> cachedUsageUtilization.utilization.limits
 LIMIT_LABELS = {"session": "session (5 h)", "weekly_all": "week, all models",
                 "weekly_scoped": "week"}
-# the KPI tile is narrow - the long label only survives in the tooltip
-SHORT_LABELS = {"session": "5 h", "weekly_all": "week all", "weekly_scoped": "week"}
+# the tile carries the reset time, so the label only has to tell the three limits apart -
+# what each window is: the 5 h block, the week, or the week of one model
+LIMIT_TAGS = {"session": "5 h", "weekly_all": "week"}
 
 _ORIGINS: set[str] = set()  # the `Host` values the page may carry, filled in by main()
 _cache: dict[str, dict] = {}
@@ -98,6 +101,7 @@ def _fresh() -> dict:
         "branch": None,
         "last_ts": None,
         "last_agent": None,
+        "req": None,
     }
 
 
@@ -163,6 +167,12 @@ def scan(path: str) -> dict:
         u = msg.get("usage")
         if not isinstance(u, dict):
             continue
+        # one request, one line per content block, each repeating the whole `usage` - see
+        # stats_scan(), which reads the archive the same way
+        req = e.get("requestId")
+        if req and req == c["req"]:
+            continue
+        c["req"] = req
         inp = u.get("input_tokens", 0)
         cr = u.get("cache_read_input_tokens", 0)
         cw = u.get("cache_creation_input_tokens", 0)
@@ -270,12 +280,11 @@ def _parse_usage() -> dict | None:
             continue
         kind = str(lim.get("kind") or "?")
         label = LIMIT_LABELS.get(kind, kind)
-        short = SHORT_LABELS.get(kind, kind)
         model = ((lim.get("scope") or {}).get("model") or {}).get("display_name")
         limits.append(
             {
                 "label": f"{label} {model}" if model else label,
-                "short": (f"{short} {model}" if model else short),
+                "tag": model or LIMIT_TAGS.get(kind, ""),
                 "percent": lim.get("percent") or 0,
                 "severity": lim.get("severity") or "normal",
                 "resetsAt": lim.get("resets_at"),
@@ -757,6 +766,175 @@ def build_state() -> dict:
     }
 
 
+# --- Per-project token statistics, over the whole archive ---
+# Everything else the dashboard shows is about now; this reads every transcript ever
+# written under ~/.claude/projects, the subagent and workflow ones nested under a session
+# included - those tokens were spent on the project like any other.
+#
+# The archive is ~500 MB and a cold pass over it takes about a second, which is why the
+# aggregate per file is kept: a transcript only ever grows, so every later pass reads the
+# tail that arrived since. What is kept per file is small - one row per calendar day.
+_stats: dict[str, dict] = {}  # transcript path -> {offset, req, cwd, days}
+_stats_proj: dict[str, tuple[str, str]] = {}  # cwd -> (repository root, name)
+_day_of: dict[str, str] = {}  # timestamp hour -> local calendar day
+
+
+def day_of(ts: str) -> str:
+    """The local day a turn happened on; transcripts timestamp in UTC. Cached by the hour,
+    so a day of work resolves in a couple of dozen conversions instead of thousands."""
+    key = ts[:13]
+    day = _day_of.get(key)
+    if day is None:
+        try:
+            t = time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            return ""
+        day = _day_of[key] = time.strftime("%Y-%m-%d", time.localtime(calendar.timegm(t)))
+    return day
+
+
+def project_of(cwd: str, cache: dict[str, tuple[str, str]]) -> tuple[str, str]:
+    """(root, name) of the repository the session ran in - a linked worktree and a
+    subdirectory of the same checkout are one project, which is what makes "per project"
+    mean anything. The same reading as git_repo(), without asking for `origin`: statistics
+    have no use for a web address, and the archive is full of directories that are gone."""
+    if cwd in cache:
+        return cache[cwd]
+    root = cwd
+    try:
+        r = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--path-format=absolute",
+             "--show-toplevel", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if r.returncode == 0:
+            top, _, common = r.stdout.strip().partition("\n")
+            root = (os.path.dirname(common) if common.endswith("/.git") else top) or cwd
+    except (OSError, subprocess.SubprocessError):
+        pass
+    out = cache[cwd] = (root, os.path.basename(root) or root or "?")
+    return out
+
+
+def stats_scan(path: Path) -> dict:
+    """Tokens per calendar day in one transcript, read forward from where the last call
+    stopped.
+
+    One API request is written as one line per content block - the reply's text, then a
+    line per tool call - and every one of those lines repeats the request's whole `usage`.
+    Adding them up counts a turn with ten tool calls eleven times. `requestId` is what
+    tells the copies apart, and they are always consecutive, so the last one seen is all
+    that has to be remembered - across reads too, hence it lives in the record."""
+    key = str(path)
+    c = _stats.get(key)
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return c or {"offset": 0, "req": None, "cwd": "", "days": {}}
+    if c is None or size < c["offset"]:  # new file or truncation
+        c = _stats[key] = {"offset": 0, "req": None, "cwd": "", "days": {}}
+    if size == c["offset"]:
+        return c
+
+    with open(path, "rb") as f:
+        f.seek(c["offset"])
+        data = f.read()
+    cut = data.rfind(b"\n")
+    if cut == -1:
+        return c
+    c["offset"] += cut + 1
+
+    for raw in data[:cut].split(b"\n"):
+        if not raw:
+            continue
+        # the cwd is on every line, but only the first one that has it gets parsed - the
+        # test below is what keeps the other 99% of the archive from being decoded twice
+        if not c["cwd"] and b'"cwd"' in raw:
+            try:
+                c["cwd"] = json.loads(raw).get("cwd") or ""
+            except ValueError:
+                pass
+        if b'"usage"' not in raw:  # most lines are prompts and tool results
+            continue
+        try:
+            e = json.loads(raw)
+        except ValueError:
+            continue
+        msg = e.get("message")
+        if not isinstance(msg, dict):
+            continue
+        u = msg.get("usage")
+        if not isinstance(u, dict):
+            continue
+        req = e.get("requestId")
+        if req and req == c["req"]:
+            continue
+        c["req"] = req
+        day = day_of(e.get("timestamp") or "")
+        if not day:
+            continue
+        d = c["days"].get(day)
+        if d is None:
+            d = c["days"][day] = [0, 0, 0, 0, 0]
+        d[0] += u.get("input_tokens") or 0
+        d[1] += u.get("output_tokens") or 0
+        d[2] += u.get("cache_read_input_tokens") or 0
+        d[3] += u.get("cache_creation_input_tokens") or 0
+        d[4] += 1
+    return c
+
+
+def build_stats() -> dict:
+    projects: dict[str, dict] = {}
+    for path in PROJECTS.rglob("*.jsonl"):
+        c = stats_scan(path)
+        if not c["days"]:
+            continue
+        root, name = project_of(c["cwd"] or str(path.parent), _stats_proj)
+        p = projects.get(root)
+        if p is None:
+            p = projects[root] = {"name": name, "path": root, "sessions": 0, "days": {}}
+        # a transcript directly under the project directory is a session; anything deeper
+        # is a subagent or a workflow of one, and would count the same session again
+        if path.parent.parent == PROJECTS:
+            p["sessions"] += 1
+        for day, v in c["days"].items():
+            d = p["days"].get(day)
+            if d is None:
+                d = p["days"][day] = [0, 0, 0, 0, 0]
+            for i in range(5):
+                d[i] += v[i]
+
+    out = []
+    for p in projects.values():
+        tot = [0, 0, 0, 0, 0]
+        for v in p["days"].values():
+            for i in range(5):
+                tot[i] += v[i]
+        out.append(
+            {
+                "name": p["name"],
+                "path": p["path"],
+                "sessions": p["sessions"],
+                "input": tot[0],
+                "output": tot[1],
+                "cache_read": tot[2],
+                "cache_write": tot[3],
+                "turns": tot[4],
+                "total": sum(tot[:4]),
+                # day -> [input, output, cache read, cache write, turns], so the page
+                # can filter every number it shows by the range the reader picked. The
+                # axis is the page's to build: the archive has gaps, and a gap is a day
+                # with no work, not a day to leave out
+                "days": {d: v for d, v in sorted(p["days"].items())},
+            }
+        )
+    out.sort(key=lambda p: -p["total"])
+    return {"now": time.time(), "projects": out}
+
+
 # --- The project backlog (the `feature` plugin's `backlog` skill describes the file) ---
 # BACKLOG.md is prose, written for a human and for the model; the dashboard only reads
 # it. The structure is small and fixed - `##` is the priority, `###` a ticket - but the
@@ -939,12 +1117,14 @@ PAGE = r"""<!doctype html>
       --bg:#191817;--card:#232120;--fg:#f0eee9;--dim:#9a938a;--line:#35322f;
       --busy:#f0906a;--idle:#7cc292;--warn:#e0a94a;--bar:#d97757;--bar2:#3d3936;
       --max:#f2776b;--idle-bg:#1d1b1a;--idle-line:#2b2927;--idle-fg:#c9c2b8;
+      --rest:#746d64;
       --att:#ffb02e;--att-ink:#ffb02e;--att-fg:#191817;--att-bg:#3a2c12;
       --att-soft:rgba(255,176,46,.16);--att-soft2:rgba(255,176,46,.04)}
 :root[data-theme="light"]{color-scheme:light;
       --bg:#f7f5f1;--card:#fff;--fg:#1f1d1b;--dim:#6b635a;--line:#e2ddd5;
       --busy:#c2410c;--idle:#2f7d54;--warn:#b07712;--bar:#b4451f;--bar2:#e8e2d9;
       --max:#d63f22;--idle-bg:#f2efe9;--idle-line:#e6e1d8;--idle-fg:#4b453d;
+      --rest:#948d84;
       --att:#e08600;--att-ink:#8a5200;--att-fg:#191817;--att-bg:#fdf1dc;
       --att-soft:rgba(224,134,0,.20);--att-soft2:rgba(224,134,0,.06)}
 *{box-sizing:border-box}
@@ -1079,6 +1259,57 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
           overflow-x:auto;font-size:11.5px;margin:0 0 8px}
 .tk-b code,.tk-f code{background:var(--bar2);border-radius:4px;padding:0 3px;font-size:11.5px}
 .bl-none{color:var(--dim);font-size:13px}
+/* --- the statistics view: filters in one row, then the chart, then the table the chart
+   is a picture of. A row of the table is the filter for the chart above it. --- */
+.st-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.st-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--dim)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg button{background:none;border:none;border-right:1px solid var(--line);color:var(--dim);
+            font:inherit;font-size:12px;padding:3px 10px;cursor:pointer}
+.seg button:last-child{border-right:none}
+.seg button:hover{color:var(--fg);background:var(--card)}
+.seg button.on{background:var(--card);color:var(--fg);font-weight:550}
+.pane{background:var(--card);border:1px solid var(--line);border-radius:10px;
+      padding:14px 16px;margin-bottom:14px}
+.pane h3{font-size:13px;margin:0;font-weight:620}
+.pane .cap{color:var(--dim);font-size:12px;margin:2px 0 12px}
+.lg{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--dim);margin-top:6px}
+.lg i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px;
+      vertical-align:-1px}
+.ch{display:block}
+.ch .gl{stroke:var(--line)}
+.ch .ax{fill:var(--dim);font-size:10px}
+.ch .hit{fill:var(--fg);fill-opacity:0}
+.ch .hit:hover{fill-opacity:.1}
+/* one row per project: the name to read down, the numbers to compare down */
+.pt-wrap{overflow-x:auto}
+.pt{width:100%;border-collapse:collapse;font-size:12.5px}
+.pt th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--dim);
+       font-weight:600;text-align:right;padding:0 0 7px 10px;white-space:nowrap;
+       border-bottom:1px solid var(--line)}
+.pt th:first-child,.pt td:first-child{text-align:left;padding-left:0;width:99%}
+.pt th:nth-child(2),.pt td:nth-child(2){width:64px;text-align:center}
+.pt td{padding:7px 0 7px 10px;border-bottom:1px solid var(--line);text-align:right;
+       font-variant-numeric:tabular-nums;white-space:nowrap}
+.pt tbody tr:last-child td{border-bottom:none}
+.pt tbody tr{cursor:pointer}
+.pt tbody tr:hover td,.pt tr.on td{background:var(--bg)}
+.pt tr.on td:first-child{box-shadow:inset 2px 0 0 var(--bar)}
+.pt .nm{font-weight:550;color:var(--fg);display:block}
+.pt .pa{color:var(--dim);font-size:11px;display:block;overflow:hidden;
+        text-overflow:ellipsis;white-space:nowrap;max-width:40ch}
+.pt .bar{margin:0;width:64px;display:inline-block;vertical-align:middle}
+.pt .sp{vertical-align:middle}
+.tip{position:fixed;z-index:9;pointer-events:none;background:var(--card);
+     border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:12px;
+     box-shadow:0 10px 30px -10px rgba(0,0,0,.5)}
+.tip b{display:block;font-size:10px;color:var(--dim);font-weight:600;margin-bottom:4px;
+       text-transform:uppercase;letter-spacing:.04em}
+.tip div{display:flex;justify-content:space-between;gap:16px;line-height:1.5}
+.tip span{color:var(--dim)}
+.tip em{font-style:normal;font-variant-numeric:tabular-nums}
+.tip i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px}
+.st-none{color:var(--dim);font-size:13px}
 </style>
 <script>
 // The root has to carry the theme before the first paint, otherwise a light-mode reload
@@ -1098,10 +1329,13 @@ document.documentElement.dataset.theme = _th === "light" || _th === "dark" ? _th
 <div class="tabs">
   <button class="tab on" data-v="sessions" onclick="setView('sessions')">sessions</button>
   <button class="tab" data-v="backlog" onclick="setView('backlog')">backlog</button>
+  <button class="tab" data-v="stats" onclick="setView('stats')">statistics</button>
 </div>
 <div class="kpis" id="kpis"></div>
 <div class="grid" id="grid"></div>
 <div id="backlog" hidden></div>
+<div id="stats" hidden></div>
+<div class="tip" id="tip" hidden></div>
 <script>
 const n = v => v >= 1e6 ? (v/1e6).toFixed(2)+"M" : v >= 1e3 ? Math.round(v/1e3)+"k" : String(v||0);
 const dur = s => s < 60 ? Math.round(s)+" s" : s < 3600 ? Math.round(s/60)+" min"
@@ -1192,19 +1426,29 @@ function hit(T){
   return all ? Math.round(100 * T.cache_read / all) + "%" : "–";
 }
 
-// plan utilization as a KPI tile - the long label and the countdown are in the tooltip
+// when the window opens again - a clock time for the 5 h block, which resets today, a
+// date for a week that is days away. 24 h: every other number on the page is tabular too.
+function resetAt(iso, now){
+  const t = Date.parse(iso)/1000;
+  if(!isFinite(t)) return "";
+  const d = new Date(t*1000);
+  return t - now > 86400
+    ? d.toLocaleDateString([], {day:"numeric", month:"numeric"})
+    : d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", hour12:false});
+}
+
+// plan utilization as a KPI tile - the reset is the label, the long one is in the tooltip
 function planKpis(u, now){
   if(!u) return "";
   return u.limits.map(l => {
     const p = Math.max(0, Math.min(100, l.percent));
     const cls = (p >= 90 || l.severity === "critical") ? "max"
               : (p >= 70 || l.severity === "warning") ? "hot" : "";
-    const reset = l.resetsAt
-      ? " · resets in " + dur(Math.max(0, Date.parse(l.resetsAt)/1000 - now)) : "";
-    const age = " · from the Claude Code cache, " + ago(u.fetchedAt, now) + " old";
+    const at = l.resetsAt ? resetAt(l.resetsAt, now) : "?";
     return `<div class="kpi plan ${cls}${l.active ? " on" : ""}"`
-      + ` title="${esc(l.label)}${reset}${age}">`
-      + `<b>${Math.round(p)} %</b><span>${esc(l.short)}</span>`
+      + ` title="${esc(l.label)}">`
+      + `<b>${Math.round(p)} %</b><span>${esc(at)}`
+      + `${l.tag ? " (" + esc(l.tag) + ")" : ""}</span>`
       + `<div class="bar"><i style="width:${p}%"></i></div></div>`;
   }).join("");
 }
@@ -1427,19 +1671,310 @@ async function boardAction(btn){
   } catch (e) { flash(key, "\u2717 " + String(e.message || e).slice(0, 30), 5000); }
 }
 
-// which view is painted; the sessions grid and the backlog never show at once - with
-// eight sessions the board would be a scroll away, which is not a board
+// --- the statistics view: where the tokens went, per project and over time ---
+// The archive behind this goes back months and does not move while you look at it, so the
+// view is deliberately not on the three-second tick: it is fetched when the tab opens and
+// when it has gone stale, and every filter repaints from what is already here.
+const DAY = 864e5;
+const msOf = d => Date.parse(d + "T00:00:00Z");
+const isoOf = ms => new Date(ms).toISOString().slice(0, 10);
+const short = d => new Date(msOf(d)).toLocaleDateString(undefined, {month: "short", day: "numeric"});
+const RANGES = [[30, "30 days"], [90, "90 days"], [0, "all"]];
+// A month of transcripts does not change in a way anybody watches by the second, so the
+// archive is read once an hour and the view sits still in between - no fetch, no repaint.
+// `re-read now` in the sub line is there for the moment you do want it sooner.
+const STATS_TTL = 36e5;
+let stats = null, statsAt = 0, stPainted = false;
+let stRange = load("st-range", 90);
+let stMetric = load("st-metric", "total");  // everything sent and written, or the output alone
+let stPick = load("st-pick", null);         // repository root; null is every project at once
+if(!RANGES.some(r => r[0] === stRange)) stRange = 90;
+if(stMetric !== "total" && stMetric !== "output") stMetric = "total";
+
+function stSet(k, v){
+  if(k === "range"){ stRange = v; save("st-range", v); }
+  if(k === "metric"){ stMetric = v; save("st-metric", v); }
+  if(k === "pick"){ stPick = stPick === v ? null : v; save("st-pick", stPick); }
+  paintStats();
+}
+
+// the calendar day the machine is on - the archive is bucketed by local day, so the axis
+// has to end on the same one
+function stToday(now){
+  const t = new Date(now * 1000), p = x => String(x).padStart(2, "0");
+  return t.getFullYear() + "-" + p(t.getMonth() + 1) + "-" + p(t.getDate());
+}
+
+// The days the view covers, chunked into the columns of the chart. It starts at the first
+// day with anything on it and never before - an axis of empty weeks in front of the
+// archive would say "nothing happened" where the truth is "nothing was recorded".
+function stBuckets(){
+  let first = null;
+  for(const p of stats.projects) for(const d in p.days) if(!first || d < first) first = d;
+  if(!first) return null;
+  const last = stToday(stats.now);
+  if(stRange){
+    const cut = isoOf(msOf(last) - (stRange - 1) * DAY);
+    if(cut > first) first = cut;
+  }
+  if(first > last) return null;
+  const days = [];
+  for(let t = msOf(first); t <= msOf(last); t += DAY) days.push(isoOf(t));
+  // a column per day reads up to about a quarter; past that it is a picket fence, so the
+  // columns become weeks - counted back from today, so the last one ends on today
+  const size = days.length > 92 ? 7 : 1;
+  const out = [];
+  for(let i = days.length; i > 0; i -= size) out.unshift(days.slice(Math.max(0, i - size), i));
+  return {list: out, days, size};
+}
+
+// the five counters of a project over a set of days; the metric picks one number out of it
+function stAgg(p, days){
+  const a = [0, 0, 0, 0, 0];
+  for(const d of days){ const r = p.days[d]; if(r) for(let i = 0; i < 5; i++) a[i] += r[i]; }
+  return a;
+}
+const stTotal = a => a[0] + a[1] + a[2] + a[3];
+const stMetricOf = a => stMetric === "output" ? a[1] : stTotal(a);
+
+// the axis wants a number to glance at; the exact one is a hover away, which is what
+// keeps the gutter narrow enough for the chart to have the width
+const nax = v => v >= 1e9 ? (v / 1e9).toFixed(1) + "B" : v >= 1e6 ? Math.round(v / 1e6) + "M"
+  : v >= 1e3 ? Math.round(v / 1e3) + "k" : String(Math.round(v) || 0);
+const CH = {h: 210, top: 10, right: 4, bottom: 22, left: 54};
+// how far "every other project" sits back from the one that was picked. Deliberately under
+// 3:1 against the card - the legend and the table carry the identity, the segment only has
+// to give the accent something to be measured against
+const REST_OP = ".6";
+const REST_SWATCH = `background:var(--rest);opacity:${REST_OP}`;
+
+// a column with its data end rounded and its foot square on the baseline
+function col(x, y, w, h, r){
+  if(h <= 0) return "";
+  r = Math.min(r, w / 2, h);
+  const f = v => v.toFixed(1);
+  return `M${f(x)} ${f(y + h)}V${f(y + r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + r)} ${f(y)}`
+    + `H${f(x + w - r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + w)} ${f(y + r)}V${f(y + h)}Z`;
+}
+
+function stTip(r){
+  const head = r.from === r.to ? short(r.from) : short(r.from) + " – " + short(r.to);
+  const unit = stMetric === "output" ? "output tokens" : "tokens";
+  let s = `<b>${esc(head)}</b><div><span>${unit}</span><em>${n(r.all)}</em></div>`;
+  if(stPick){
+    const p = stats.projects.find(x => x.path === stPick);
+    s += `<div><span><i style="background:var(--bar)"></i>${esc(p ? p.name : "picked")}</span>`
+       + `<em>${n(r.pick)}</em></div>`
+       + `<div><span><i style="${REST_SWATCH}"></i>other projects</span>`
+       + `<em>${n(r.all - r.pick)}</em></div>`;
+  }
+  return s;
+}
+
+function chart(w, rows){
+  const iw = Math.max(60, w - CH.left - CH.right), ih = CH.h - CH.top - CH.bottom;
+  const base = CH.top + ih;
+  const max = Math.max(1, ...rows.map(r => r.all));
+  const step = iw / rows.length, bw = Math.max(1, Math.min(26, step - 2));
+  let wk = "", g = "", b = "", hits = "", xl = "";
+  rows.forEach((r, i) => {
+    if(r.from !== r.to) return;  // a weekly column is part weekend by definition
+    const d = new Date(msOf(r.from)).getUTCDay();
+    if(d !== 0 && d !== 6) return;
+    wk += `<rect x="${(CH.left + i * step).toFixed(1)}" y="${CH.top}"`
+      + ` width="${step.toFixed(1)}" height="${ih}" fill="var(--fg)" fill-opacity=".045"/>`;
+  });
+  for(const f of [0, .5, 1]){
+    const y = (base - f * ih).toFixed(1);
+    g += `<line class="gl" x1="${CH.left}" x2="${CH.left + iw}" y1="${y}" y2="${y}"/>`
+       + `<text class="ax" x="${CH.left - 8}" y="${y}" text-anchor="end"`
+       + ` dominant-baseline="middle">${nax(max * f)}</text>`;
+  }
+  const every = Math.max(1, Math.ceil(rows.length / 6));
+  rows.forEach((r, i) => {
+    const x = CH.left + i * step + (step - bw) / 2;
+    if(stPick){
+      const hp = (r.pick / max) * ih, ho = ((r.all - r.pick) / max) * ih;
+      const gap = hp > 0 && ho > 0 ? 2 : 0;  // the surface shows between two segments
+      if(ho > gap) b += `<path d="${col(x, base - hp - ho, bw, ho - gap, 3)}"`
+        + ` fill="var(--rest)" fill-opacity="${REST_OP}"/>`;
+      if(hp > 0) b += `<path d="${col(x, base - hp, bw, hp, ho > 0 ? 0 : 3)}" fill="var(--bar)"/>`;
+    } else if(r.all > 0){
+      b += `<path d="${col(x, base - (r.all / max) * ih, bw, (r.all / max) * ih, 3)}" fill="var(--bar)"/>`;
+    }
+    hits += `<rect class="hit" x="${(CH.left + i * step).toFixed(1)}" y="${CH.top}"`
+      + ` width="${step.toFixed(1)}" height="${ih}" rx="4" data-tip="${esc(stTip(r))}"/>`;
+    if(i % every === 0)
+      xl += `<text class="ax" x="${(x + bw / 2).toFixed(1)}" y="${CH.h - 6}"`
+        + ` text-anchor="middle">${esc(short(r.from))}</text>`;
+  });
+  return `<svg class="ch" width="${w}" height="${CH.h}" viewBox="0 0 ${w} ${CH.h}">`
+    + wk + g + b + hits + xl + `</svg>`;
+}
+
+function spark(vals){
+  const max = Math.max(1, ...vals), w = 64, h = 18;
+  const step = w / vals.length, bw = Math.max(1, step - 1);
+  return `<svg class="sp" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` + vals.map((v, i) => {
+    const bh = v > 0 ? Math.max(1, (v / max) * h) : 0;
+    return bh ? `<rect x="${(i * step).toFixed(1)}" y="${(h - bh).toFixed(1)}"`
+      + ` width="${bw.toFixed(1)}" height="${bh.toFixed(1)}"`
+      + ` rx="${Math.min(1.5, bw / 2).toFixed(1)}" fill="var(--bar)"/>` : "";
+  }).join("") + `</svg>`;
+}
+
+// the value travels through an onclick attribute, so the quotes JSON.stringify writes have
+// to become entities on the way - a bare `"project path"` ends the attribute at its own first
+// quote, and the handler is cut in half
+const arg = v => esc(JSON.stringify(v));
+
+function seg(k, opts, cur){
+  return `<div class="seg">` + opts.map(([v, l]) =>
+    `<button class="${v === cur ? "on" : ""}" onclick="stSet('${k}',${arg(v)})">`
+    + `${esc(l)}</button>`).join("") + `</div>`;
+}
+
+function paintStats(){
+  const el = document.getElementById("stats");
+  if(!stats){ el.innerHTML = `<div class="st-none">loading…</div>`; return; }
+  const b = stBuckets();
+  if(!b){ el.innerHTML = `<div class="st-none">no transcripts in this range.</div>`; return; }
+
+  // every project, aggregated over the range; the chart, the tiles and the table are all
+  // this one table of numbers seen from different sides
+  const rows = stats.projects.map(p => {
+    const a = stAgg(p, b.days);
+    return {p, a, total: stTotal(a), metric: stMetricOf(a),
+            spark: b.list.map(ds => stMetricOf(stAgg(p, ds)))};
+  }).filter(r => r.total > 0).sort((x, y) => y.metric - x.metric);
+  if(!rows.length){ el.innerHTML = `<div class="st-none">no tokens in this range.</div>`; return; }
+  if(!rows.some(r => r.p.path === stPick)) stPick = null;  // filtered out by the range
+
+  const cols = b.list.map((ds, i) => ({
+    from: ds[0], to: ds[ds.length - 1],
+    all: rows.reduce((s, r) => s + r.spark[i], 0),
+    pick: (rows.find(r => r.p.path === stPick) || {spark: []}).spark[i] || 0,
+  }));
+  const sum = [0, 0, 0, 0, 0];
+  for(const r of rows) for(let i = 0; i < 5; i++) sum[i] += r.a[i];
+  const T = {input: sum[0], cache_read: sum[2], cache_write: sum[3]};
+  const top = cols.reduce((m, c) => c.all > m.all ? c : m, cols[0]);
+  const pick = rows.find(r => r.p.path === stPick);
+  const unit = stMetric === "output" ? "output tokens" : "tokens";
+
+  el.innerHTML =
+      `<div class="st-row">`
+    + `<span class="st-lbl">range</span>${seg("range", RANGES, stRange)}`
+    + `<span class="st-lbl">count</span>`
+    + seg("metric", [["total", "all tokens"], ["output", "output only"]], stMetric)
+    + `</div>`
+    + `<div class="kpis">`
+    + kpi(n(stTotal(sum)), "tokens total") + kpi(n(sum[1]), "output tokens")
+    + kpi(hit(T), "cache hit") + kpi(n(sum[4]), "turns")
+    + kpi(rows.length, "projects") + kpi(short(top.from), "busiest " + (b.size > 1 ? "week" : "day"))
+    + `</div>`
+    + `<div class="pane">`
+    + `<h3>${esc(pick ? pick.p.name : "All projects")} · ${unit} over time</h3>`
+    + `<div class="cap">${b.size > 1 ? "per week" : "per day"}, `
+    + `${esc(short(cols[0].from))} – ${esc(short(cols[cols.length - 1].to))}`
+    + (pick ? ` · the rest of the bar is every other project` : ``)
+    + (pick ? ` · <a href="#" onclick="stSet('pick',${arg(stPick)});return false">clear</a>` : ` · pick a project below to single it out`)
+    + `</div><div id="ch"></div>`
+    + (pick ? `<div class="lg"><span><i style="background:var(--bar)"></i>`
+        + `${esc(pick.p.name)}</span><span><i style="${REST_SWATCH}"></i>`
+        + `other projects</span></div>` : ``)
+    + `</div>`
+    + `<div class="pane"><h3>Projects</h3>`
+    + `<div class="cap">${esc(unit)} in this range · click a row to single it out</div>`
+    + `<div class="pt-wrap"><table class="pt"><thead><tr><th>project</th><th>trend</th><th>share</th>`
+    + `<th>${esc(unit)}</th>`
+    + (stMetric === "output" ? `` : `<th>output</th>`)  // the metric column already is it
+    + `<th>cache hit</th><th>turns</th>`
+    + `<th>sessions</th></tr></thead><tbody>`
+    + rows.map(r => {
+        const share = stMetricOf(sum) ? r.metric / stMetricOf(sum) : 0;
+        return `<tr class="${r.p.path === stPick ? "on" : ""}"`
+          + ` onclick="stSet('pick',${arg(r.p.path)})">`
+          + `<td><span class="nm">${esc(r.p.name)}</span>`
+          + `<span class="pa">${esc(r.p.path)}</span></td>`
+          + `<td>${spark(r.spark)}</td>`
+          + `<td><span class="bar"><i style="width:${(share * 100).toFixed(1)}%"></i></span>`
+          + ` ${Math.round(share * 100)}%</td>`
+          + `<td>${n(r.metric)}</td>`
+          + (stMetric === "output" ? `` : `<td>${n(r.a[1])}</td>`)
+          + `<td>${hit({input: r.a[0], cache_read: r.a[2], cache_write: r.a[3]})}</td>`
+          + `<td>${n(r.a[4])}</td><td>${r.p.sessions}</td></tr>`;
+      }).join("")
+    + `</tbody></table></div>`
+    + `<div class="cap" style="margin:10px 0 0">sessions is the whole archive; every other`
+    + ` number follows the range.</div></div>`;
+  stCols = cols;
+  paintChart();
+}
+
+// the chart is the one thing that has to know how wide it ended up, so it is drawn after
+// the pane around it is in the document - and again whenever that width changes
+let stCols = null, stRaf = 0;
+function paintChart(){
+  const holder = document.getElementById("ch");
+  if(!holder || !stCols) return;
+  holder.innerHTML = chart(Math.max(280, holder.clientWidth), stCols);
+}
+addEventListener("resize", () => {
+  cancelAnimationFrame(stRaf);
+  stRaf = requestAnimationFrame(() => { if(view === "stats") paintChart(); });
+});
+
+// one tooltip for every mark on the page, found by delegation - the panes are rebuilt
+// from innerHTML on every filter, and a listener per column would not survive that
+addEventListener("mousemove", e => {
+  const tip = document.getElementById("tip");
+  const t = e.target instanceof Element ? e.target.closest("[data-tip]") : null;
+  if(!t){ tip.hidden = true; return; }
+  if(tip.dataset.for !== t.dataset.tip){ tip.innerHTML = t.dataset.tip; tip.dataset.for = t.dataset.tip; }
+  tip.hidden = false;
+  const r = tip.getBoundingClientRect();
+  tip.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, e.clientX + 14)) + "px";
+  tip.style.top = Math.max(8, e.clientY - r.height - 12) + "px";
+});
+
+// the sub line on this view answers "how old is what I am looking at", which is a
+// different question from the one the other two views ask their tick
+function stampStats(){
+  document.getElementById("sub").innerHTML =
+    "archive read " + new Date(statsAt).toLocaleTimeString() + " \u00b7 re-read hourly \u00b7 "
+    + `<button class="iv" onclick="tickStats(true)">re-read now</button>`;
+}
+
+async function tickStats(force){
+  const stale = force || !stats || Date.now() - statsAt > STATS_TTL;
+  if(!stale && stPainted) return;  // nothing has happened that the page does not already show
+  if(stale){
+    stats = await (await fetch("/api/stats")).json();
+    statsAt = Date.now();
+  }
+  stPainted = true;
+  stampStats();
+  paintStats();
+}
+
+// which view is painted; only one of the three shows at a time - with eight sessions the
+// board would be a scroll away, which is not a board
+const VIEWS = ["sessions", "backlog", "stats"];
 let view = load("view", "sessions");
-if(view !== "backlog") view = "sessions";
+if(!VIEWS.includes(view)) view = "sessions";
 function setView(v){
   view = v;
   save("view", v);
+  stPainted = false;  // whichever view is arrived at gets one paint
   // only the view tabs - the board's project picker shares the class and would lose its
   // own `on` until the next repaint three seconds later
   document.querySelectorAll(".tab[data-v]").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   document.getElementById("kpis").hidden = v !== "sessions";
   document.getElementById("grid").hidden = v !== "sessions";
   document.getElementById("backlog").hidden = v !== "backlog";
+  document.getElementById("stats").hidden = v !== "stats";
+  document.getElementById("tip").hidden = true;
   tick();
 }
 
@@ -1460,17 +1995,19 @@ async function tickBacklog(){
 async function tick(){
   try {
     if(view === "backlog"){ await tickBacklog(); return; }
+    if(view === "stats"){ await tickStats(); return; }
     const d = await (await fetch("/api/state")).json();
     const T = d.totals, now = d.now;
     const U = d.usage;
     stamp();
     document.getElementById("kpis").innerHTML =
       planKpis(U, now)
-      + kpi(T.sessions, "sessions") + kpi(T.busy, "busy")
-      + `<div class="kpi${T.waiting ? " att" : ""}"><b>${T.waiting}</b>`
+      + kpi(T.sessions, "sessions", "more-only") + kpi(T.busy, "busy", "more-only")
+      + `<div class="kpi more-only${T.waiting ? " att" : ""}"><b>${T.waiting}</b>`
       + `<span>need you</span></div>`
-      + kpi(n(T.context), "context total")
-      + kpi(n(T.output), "output tokens") + kpi(hit(T), "cache hit")
+      + kpi(n(T.context), "context total", "more-only")
+      + kpi(n(T.output), "output tokens", "more-only")
+      + kpi(hit(T), "cache hit", "more-only")
       + kpi(T.subagents, "subagents", "more-only")
       + kpi(T.turns, "turns", "more-only")
       + kpi(n(T.input), "input tokens", "more-only")
@@ -1542,6 +2079,10 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/api/backlog"):
             with _lock:
                 body = json.dumps(build_backlog()).encode()
+            ctype = "application/json"
+        elif self.path.startswith("/api/stats"):
+            with _lock:
+                body = json.dumps(build_stats()).encode()
             ctype = "application/json"
         elif self.path in ("/", "/index.html"):
             body, ctype = PAGE.encode(), "text/html; charset=utf-8"
