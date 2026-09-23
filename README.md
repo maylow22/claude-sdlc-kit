@@ -21,12 +21,22 @@ tracker from the repo rather than assuming them.
 ## Installation
 
 ```bash
-claude plugin marketplace add maylow22/claude-kit    # or locally: ~/Workspace/claude-kit
-claude plugin install claude-monitor@claude-kit
+claude plugin marketplace add maylow22/claude-sdlc-kit   # the repository
+claude plugin install claude-monitor@claude-kit          # the marketplace inside it
 claude plugin install feature@claude-kit
 ```
 
+The repository is `claude-sdlc-kit`, the marketplace it declares is `claude-kit` — the first
+command takes the repo, the rest take the marketplace. The same three work inside a session as
+`/plugin marketplace add …` / `/plugin install …`, and a clone installs the same way with a path
+instead of the repo (`claude plugin marketplace add ~/dev/claude-sdlc-kit`).
+
 Restart Claude Code (or `/reload-plugins`), then `/claude-monitor:start`, `/feature:start`.
+
+The repository is public, so nothing but git and Claude Code is needed —
+[github.com/maylow22/claude-sdlc-kit](https://github.com/maylow22/claude-sdlc-kit) is the whole
+link to pass on. Later: `claude plugin update claude-monitor@claude-kit` (a restart applies it),
+`claude plugin uninstall <plugin>@claude-kit` to drop one.
 
 ## Plugins
 
