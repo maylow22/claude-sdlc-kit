@@ -1226,7 +1226,10 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .th:hover{border-color:var(--dim);color:var(--fg)}
 .tabs{display:inline-flex;gap:6px;margin-bottom:14px}
 .tab{background:none;border:1px solid var(--line);border-radius:6px;color:var(--dim);
-     font:inherit;font-size:12px;padding:3px 10px;cursor:pointer}
+     font:inherit;font-size:12px;padding:3px 10px;cursor:pointer;
+     display:inline-flex;align-items:center;gap:6px}
+.tab svg{width:11px;height:11px;flex:none;opacity:.8}
+.tab.on svg{opacity:1;color:var(--bar)}
 .tab:hover{border-color:var(--dim);color:var(--fg)}
 .tab.on{border-color:var(--bar);color:var(--fg)}
 /* the backlog: a list to scan on the left, one ticket open on the right - a ticket is
@@ -1327,9 +1330,9 @@ document.documentElement.dataset.theme = _th === "light" || _th === "dark" ? _th
 <h1>Claudemon</h1>
 <div class="sub" id="sub">loading…</div>
 <div class="tabs">
-  <button class="tab on" data-v="sessions" onclick="setView('sessions')">sessions</button>
-  <button class="tab" data-v="backlog" onclick="setView('backlog')">backlog</button>
-  <button class="tab" data-v="stats" onclick="setView('stats')">statistics</button>
+  <button class="tab on" data-v="sessions" onclick="setView('sessions')"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect width="5" height="5" rx="1.2"/><rect x="7" width="5" height="5" rx="1.2"/><rect y="7" width="5" height="5" rx="1.2"/><rect x="7" y="7" width="5" height="5" rx="1.2"/></svg>sessions</button>
+  <button class="tab" data-v="backlog" onclick="setView('backlog')"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect y="1" width="3" height="3" rx="1"/><rect x="4.7" y="2" width="7.3" height="1.4" rx=".7"/><rect y="8" width="3" height="3" rx="1"/><rect x="4.7" y="9" width="7.3" height="1.4" rx=".7"/></svg>backlog</button>
+  <button class="tab" data-v="stats" onclick="setView('stats')"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect y="6" width="3" height="6" rx="1"/><rect x="4.5" y="2" width="3" height="10" rx="1"/><rect x="9" y="4" width="3" height="8" rx="1"/></svg>statistics</button>
 </div>
 <div class="kpis" id="kpis"></div>
 <div class="grid" id="grid"></div>
