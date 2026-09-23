@@ -7,6 +7,12 @@ Data sources:
   - .../<sid>/subagents/agent-*      -> subagent tree (agentType, spawnDepth, tokens)
   - ~/.claude/monitor/notify/*.json  -> Notification hook: session is waiting on the user
 
+Nothing is registered at start-up and no state is kept between requests: every /api/state
+re-reads all of the above, so a session older than the server appears on the next poll
+like any other. What does go stale is a long-lived process - `claude agents --json` has
+been seen answering an orphaned server with a session list hours out of date - which is
+why SessionStart restarts the dashboard rather than leaving one instance running for days.
+
 Run:  python3 claude_monitor.py [--port 8787] [--open]
 """
 
@@ -1245,7 +1251,15 @@ setView(view);  // the markup ships with sessions open; a restored view has to t
 arm();
 </script>
 """
-PAGE = PAGE.replace("__VERSION__", code_version())
+VERSION = code_version()
+PAGE = PAGE.replace("__VERSION__", VERSION)
+
+# Before a restart replaces whatever holds the port it has to know the process is ours, and
+# `ps` cannot be relied on to say so - a process spawned by Claude Code can be refused the
+# process table outright ("operation not permitted"), which used to read as "somebody
+# else's server" and made the restart back off. So the dashboard introduces itself on a
+# route nothing else answers; see tools/restart.sh.
+WHOAMI = json.dumps({"app": "claude-monitor", "pid": os.getpid(), "version": VERSION})
 
 MANIFEST = json.dumps({
     "id": "/",
@@ -1291,6 +1305,11 @@ class Handler(BaseHTTPRequestHandler):
             ctype = "application/json"
         elif self.path in ("/", "/index.html"):
             body, ctype = PAGE.encode(), "text/html; charset=utf-8"
+        elif self.path == "/api/whoami":
+            # deliberately free of locks and subprocesses: a restart probes this while the
+            # server may be busy building state, and a slow answer would look like a
+            # foreign process
+            body, ctype = WHOAMI.encode(), "application/json"
         elif self.path == "/manifest.webmanifest":
             body, ctype = MANIFEST.encode(), "application/manifest+json"
             cache = "max-age=3600"
@@ -1331,24 +1350,38 @@ class Handler(BaseHTTPRequestHandler):
         return not origin or origin in {f"http://{h}" for h in _ORIGINS}
 
     def do_POST(self):  # noqa: N802
-        if self.path.split("?")[0] != "/api/focus":
+        route = self.path.split("?")[0]
+        if route not in ("/api/focus", "/api/quit"):
             self.send_error(404)
             return
         if not self.same_origin():
             self.send_error(403)
             return
-        try:
-            n = int(self.headers.get("Content-Length") or 0)
-            req = json.loads(self.rfile.read(n) or b"{}")
-            res = focus(int(req["pid"]), str(req.get("cwd") or ""))
-        except (ValueError, KeyError, TypeError) as e:
-            res = {"ok": False, "error": str(e)}
+        if route == "/api/quit":
+            # A restart almost always runs from a different session than the one that
+            # started the server, and Claude Code confines a session to its own process
+            # tree - the same user gets "Operation not permitted" from kill() on a monitor
+            # another session spawned. Serving its own stop is the way out: the process
+            # that has to die is the one handling the request. The route is no wider than
+            # /api/focus, which already drives AppleScript on the same guards.
+            res = {"ok": True, "pid": os.getpid()}
+        else:
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                req = json.loads(self.rfile.read(n) or b"{}")
+                res = focus(int(req["pid"]), str(req.get("cwd") or ""))
+            except (ValueError, KeyError, TypeError) as e:
+                res = {"ok": False, "error": str(e)}
         body = json.dumps(res).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+        if route == "/api/quit":
+            # shutdown() blocks until serve_forever() has returned, so it can never run on
+            # a thread that is still inside a request
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
 
     def log_message(self, *a):  # quiet
         pass
@@ -1372,6 +1405,8 @@ def main() -> None:
         srv.serve_forever()
     except KeyboardInterrupt:
         print("\nstopped")
+    finally:
+        srv.server_close()  # hand the port back at once, a restart is waiting on it
 
 
 if __name__ == "__main__":

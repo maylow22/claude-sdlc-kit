@@ -8,7 +8,8 @@ the header to cycle it: 3 s → 10 s → 1 min → stop (a real stop, no timer a
 # usually nothing — the dashboard starts itself at session start (SessionStart hook)
 /claude-monitor:start          # → http://127.0.0.1:8787/
 python3 tools/claude_monitor.py --port 8787 --open
-tools/restart.sh [port]        # kill the running instance and start a fresh one
+tools/restart.sh [port]        # replace the running instance with a fresh one
+tools/restart.sh --status      # who holds the port: ours | foreign | down
 ```
 
 ## Who is waiting on you
@@ -108,14 +109,53 @@ under a second and the browser polls every 3 s. What is lost are the in-memory t
 offsets, so the first refresh after a restart re-reads every transcript from the beginning
 (the totals come out the same, it is just not the cheap incremental read).
 
-Restarting is safe under concurrency: the kill always precedes the start, so when several
+Restarting is safe under concurrency: the stop always precedes the start, so when several
 sessions start at once exactly one server survives, and each hook verifies the **port** rather
-than its own pid — nobody reports an untruth. `tools/restart.sh` refuses to kill a process on
-the port that is not `claude_monitor.py`; the hook then reports that the dashboard is not
-running instead of stealing somebody else's port.
+than its own pid.
 
-You stop it with `kill $(lsof -ti:8787)`; it will not stop on its own — but the next session
-start brings it back.
+### Stopping an instance another session started
+
+The restart is what keeps the dashboard honest: an instance left running for days has been seen
+answering with a session list hours out of date — `claude agents --json` goes stale in a
+long-lived orphan, reporting a session that died in the night and missing the one typing at you
+now. Getting the old process to go is the hard part, and a signal does not do it.
+
+Claude Code confines a session to its **own process tree**. A monitor started by session A
+cannot be killed by session B — `kill` answers `Operation not permitted` though both run as the
+same user — and `ps` is refused outright, so nothing inside a hook can even look up what a pid
+belongs to.
+
+Neither end of the restart therefore touches the process table:
+
+| Step | How |
+|---|---|
+| whose server is on the port | `GET /api/whoami` → `{"app": "claude-monitor", …}`; builds older than that route are recognized by the shape of `/api/state` |
+| stopping it | `POST /api/quit` — the process handling the request is the one that has to go, so no signal ever crosses a tree boundary |
+| the fallback | `kill` by `lsof -ti:<port> -sTCP:LISTEN`, for builds without `/api/quit` and for a server this session did start itself |
+| confirming the new one | `GET /api/whoami` again — merely *listening* would be satisfied by anything that grabbed the port in the meantime |
+
+`tools/restart.sh --status [port]` prints that verdict on its own: `ours`, `foreign` or `down`.
+A port held by something that is **not** the dashboard is never killed — the restart exits `3`
+and says whose it is.
+
+### The hook does not report an untruth
+
+A failed restart does not mean the dashboard is down, and saying so is exactly what this used to
+get wrong: `ps` being unavailable read as "somebody else's process", the restart backed off, and
+every new session opened with `Claude monitor is not running` while the dashboard had been
+serving the whole time. The hook now asks the port who is on it **before** it reports, and has
+three answers:
+
+| Situation | What the session is told |
+|---|---|
+| a fresh instance answers | `Claude monitor: http://localhost:8787/` |
+| the restart failed, ours still answers | `… is running at …, but could not be restarted (<reason>), so it may be serving older code and a stale session list` |
+| nothing of ours on the port | `… is not running on port 8787 (<reason>) — run /claude-monitor:start` |
+
+You stop it by hand with `tools/restart.sh --status` first and then either
+`curl -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8787/api/quit`, or
+`kill $(lsof -ti:8787)` **from your own terminal** — which, unlike a session, is not confined to
+somebody else's tree. It will not stop on its own; the next session start brings it back.
 
 ## What it shows
 
@@ -202,11 +242,17 @@ Those reads are not a small matter. `/api/state` hands out the absolute path of 
 on the machine, the branch each one is on, session pids, and — for a session waiting on you —
 why it is waiting and the last thing it said; `/api/backlog` adds the full prose of every
 backlog found, which of its tickets are being worked on, and the pid and `cwd` of a session
-sitting there. `POST /api/focus` is the only route that acts on the machine rather than
-reporting on it, and it adds two legs: `Content-Type` has to be `application/json`, which makes
-the request non-simple, so a cross-origin attempt needs a preflight this server does not
-answer, and `Origin`/`Sec-Fetch-Site`, when present, has to be same-origin. Anything else is a
-`403`.
+sitting there. `POST /api/focus` and `POST /api/quit` are the routes that act on the machine
+rather than reporting on it, and they add two legs: `Content-Type` has to be
+`application/json`, which makes the request non-simple, so a cross-origin attempt needs a
+preflight this server does not answer, and `Origin`/`Sec-Fetch-Site`, when present, has to be
+same-origin. Anything else is a `403`.
+
+`/api/quit` stops the server and is on those same guards — the most a page that got through
+could do with it is take the dashboard down, which the next session start undoes, and it is a
+good deal less than `/api/focus` already grants. `GET /api/whoami` gives up the app name, the
+pid and the version, and exists so a restart can tell its own server from a stranger's without
+the process table.
 
 The gate authorizes **by origin, never by identity** — there is no token and no login. It asks
 where a request comes from, which a *web page* cannot lie about; a program on the machine can.
@@ -227,7 +273,7 @@ not run the dashboard (`CLAUDE_MONITOR_AUTOSTART=0`).
 | the reason for waiting on the user | `hooks/notification.py` → `~/.claude/monitor/notify/<sessionId>.json` |
 | the backlog board | `BACKLOG.md` + `BACKLOG.done.md` in the repository root of an open session's `cwd` (parsed only when the file changes) |
 | which ticket is being worked on | `git branch --show-current` in each backlog project's root, matched against the ticket's field values (backticks stripped, compared whole) |
-| the app hosting a session | `ps -Ao pid,ppid,tty,command` — one call per refresh, the parent chain is walked in memory |
+| the app hosting a session | `ps -Ao pid,ppid,tty,command` — one call per refresh, the parent chain is walked in memory; where the process table is refused, no app is found and the button is simply not rendered |
 
 Transcripts are read incrementally (the offset is remembered), so a refresh costs the same
 whether the file is small or several megabytes.
@@ -251,6 +297,10 @@ whether the file is small or several megabytes.
 - The spinner marking a ticket as taken up needs the ticket to **carry its branch in a field**.
   `/feature:start` writes that line when it creates the branch; a ticket started by hand, or one
   filed before that was the habit, stays unmarked — the board just does not know.
+- A session may not signal, or even see, a process outside its **own tree**: `ps` comes back
+  `operation not permitted` and `kill` `Operation not permitted`, same user or not. That is why
+  the restart goes over HTTP — and why the `↗ <app>` button quietly disappears where the process
+  table is refused, as the parent chain cannot be walked and no `.app` is ever found.
 - The Dock icon is read **once**, when you add the app. Changing `assets/` afterwards does not
   reach an app already in the Dock — remove it and add it again. The icons are served with
   `max-age=86400`, so a browser tab wants a hard reload too.
