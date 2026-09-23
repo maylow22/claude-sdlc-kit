@@ -187,9 +187,10 @@ yet still lands on the right side of the sort and of the KPI count.
 ## What it shows
 
 - **one KPI row** — it opens with plan utilization (5 h session, weekly, weekly model) as
-  percent tiles with a thin bar, the active limit framed; the long label, the countdown to the
-  reset and the age of the usage cache are in the tooltip. Then the counts and the few token numbers that matter; the
-  rest is folded behind **show more**
+  percent tiles with a thin bar, the active limit framed and labelled by **when its window
+  resets** — a clock time for the 5 h block (`14:20 (5 h)`), a date for the weekly ones
+  (`27/09 (week)`, `27/09 (Fable)`); the long label is in the tooltip. Those three tiles are
+  the whole row at rest — the counts and every token number sit behind **show more**
 - **which session this is** — the card is headed by the **session's own name** (`hx-anon`,
   `claude-sdlc-kit-c3`), because that is what tells two sessions in one repository apart. Under
   it the checkout, a line each: the repository, the branch, and — only for a linked worktree —
@@ -266,6 +267,45 @@ session cards do, as those only ever show a failure. The board is repainted whol
 3 s, so the message lives in a page variable next to the selection, not in the DOM where the
 next tick would eat it.
 
+## The statistics view
+
+The third view, behind the `statistics` tab: the archive rather than the moment. Every
+transcript ever written under `~/.claude/projects` is read for `message.usage` and bucketed by
+project and by calendar day, which answers the two questions the session cards cannot — how
+many tokens a project has cost in total, and how that went over time.
+
+A **project** is the repository, not the directory: a linked worktree and a subdirectory of the
+same checkout fold into one row, because otherwise `claude-kit` and `claude-kit/plugins/claude-monitor`
+would be two projects and neither number would mean anything. The nested transcripts count too —
+a subagent's and a workflow's tokens were spent on the project like any other.
+
+The **range** (30 days / 90 days / all) and the **count** (every token the model was sent and
+wrote, or the output alone) are the only two filters, and they move every number on the page at
+once — the tiles, the chart and the table are one table of numbers seen from three sides. Cache
+reads are most of the traffic, which is why `all tokens` and `output only` are separate: they
+differ by two orders of magnitude and no single number tells both stories.
+
+Clicking a row in the table **singles that project out**: the column chart keeps its full height
+— the bar is still the whole day — and the project's share is painted in the accent colour with
+the rest of it in gray. What it went up against is the point; a chart of one project alone would
+lose it. Columns become weeks once the range passes about a quarter, because a column per day
+past that is a picket fence.
+
+The axis starts at the first day anything was recorded and never earlier, and the gaps inside
+are left as gaps: a day with no work is not a day to leave out. Hovering a column gives the
+exact numbers, which is what keeps the axis labels rounded to `331M`.
+
+The archive is around half a gigabyte; a cold read takes a second or so and is done once — the
+aggregate per transcript is kept and every later pass reads only the tail that arrived since,
+the same way the session cards read a live transcript.
+
+A month of transcripts does not change in a way anybody watches by the second, so the view is
+**read once an hour** and sits still in between — no fetch and no repaint on the 3 s tick, which
+is also what keeps the hover from being pulled out from under the cursor. The sub line says how
+old what you are looking at is (`archive read 14:31:09 · re-read hourly`) and carries a
+**re-read now** button for the moment you want it sooner; switching to the tab with nothing
+cached reads it too.
+
 ## Who may talk to the server
 
 The server is bound to the loopback, and that on its own settles less than it looks: a page on
@@ -314,6 +354,7 @@ not run the dashboard (`CLAUDE_MONITOR_AUTOSTART=0`).
 | plan usage tiles | `~/.claude.json` → `cachedUsageUtilization` (the cache `/usage` fills) |
 | restart + URL into the session | `hooks/session-start.sh` → `tools/restart.sh` (SessionStart hook) |
 | the reason for waiting on the user | `hooks/notification.py` → `~/.claude/monitor/notify/<sessionId>.json` |
+| per-project statistics | every `*.jsonl` under `~/.claude/projects` (the nested subagent and workflow transcripts included) → `.message.usage` by `.timestamp`, grouped by the repository root of `.cwd` |
 | the backlog board | `BACKLOG.md` + `BACKLOG.done.md` in the repository root of an open session's `cwd` (parsed only when the file changes) |
 | which ticket is being worked on | `git branch --show-current` in each backlog project's root, matched against the ticket's field values (backticks stripped, compared whole) |
 | the app hosting a session | `ps -Ao pid,ppid,tty,command` — one call per refresh, the parent chain is walked in memory; where the process table is refused, no app is found and the button is simply not rendered |
@@ -323,6 +364,10 @@ whether the file is small or several megabytes.
 
 ## Traps
 
+- One API request is written as **one line per content block** — the reply's text, then a line
+  per tool call — and every one of those lines repeats the request's whole `usage`. Adding up
+  the lines counts a turn with ten tool calls eleven times. `requestId` tells the copies apart
+  and they are always consecutive, so both readers skip a line whose id matches the last one.
 - The transcript's `message.model` **does not carry the `[1m]` suffix** — you cannot tell the
   1M tier from the log. The context limits therefore live in `CONTEXT_LIMITS` at the top of the
   script (Claude 5 family 1M, Haiku 4.5 200K); Claude Code may auto-compact earlier.
