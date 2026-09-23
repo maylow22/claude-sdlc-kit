@@ -295,14 +295,21 @@ def _parse_usage() -> dict | None:
 def read_usage() -> dict | None:
     """Plan utilization (what /usage shows). Claude Code caches it in ~/.claude.json;
     we never query the API ourselves, so the number is only as fresh as the cache -
-    which is why fetchedAt travels with it."""
+    which is why fetchedAt travels with it.
+
+    Claude Code rewrites that file in place, so a read can land on a half-written one
+    and parse to nothing. That must not blank the three plan tiles: a failed read keeps
+    the last good snapshot and leaves mtime untouched, so the next tick tries again."""
     try:
         mtime = os.stat(CONFIG).st_mtime
     except OSError:
-        return None
+        return _usage["data"]
     if _usage["mtime"] != mtime:
+        data = _parse_usage()
+        if data is None:
+            return _usage["data"]
         _usage["mtime"] = mtime
-        _usage["data"] = _parse_usage()
+        _usage["data"] = data
     return _usage["data"]
 
 
