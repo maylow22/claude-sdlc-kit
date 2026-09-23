@@ -910,9 +910,11 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .att-row .say.open{display:block;white-space:pre-wrap}
 .att-row .say.open::before{content:"\25b4 "}
 .kpi.att b{color:var(--att-ink)}
-.branch{font-size:12px;font-weight:460;color:var(--fg);opacity:.75;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.branch b{font-weight:620}
-.wt{font-size:11.5px;color:var(--dim);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.repo,.branch,.wt{font-size:12px;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.repo,.branch{color:var(--fg);opacity:.75}
+.repo{font-weight:460}
+.branch{font-weight:620}
+.wt{font-size:11.5px;color:var(--dim)}
 .meta{color:var(--dim);font-size:12px;margin-bottom:9px}
 .bar{height:5px;background:var(--bar2);border-radius:99px;overflow:hidden;margin:3px 0 5px}
 .bar>i{display:block;height:100%;background:var(--bar)}
@@ -1150,7 +1152,8 @@ function card(s, now){
         >&#8599; ${esc(s.host)}</button>` : ""}
       <span class="pill ${st}">${st === "busy" ? '<i class="spin"></i>' : ""}${
         a ? "needs you" : st}</span></div>
-    <div class="branch">${esc(s.repo)}${s.branch ? `:<b>${esc(s.branch)}</b>` : ""}</div>
+    <div class="repo">${esc(s.repo)}</div>
+    ${s.branch ? `<div class="branch">${esc(s.branch)}</div>` : ""}
     ${s.worktree ? `<div class="wt">wt:${esc(s.worktree)}</div>` : ""}
     <div class="meta">${esc(s.kind)}
       · pid ${s.pid} · ${esc(s.model||"?")}${s.effort?" / "+esc(s.effort):""}

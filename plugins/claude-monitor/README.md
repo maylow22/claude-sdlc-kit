@@ -192,8 +192,8 @@ yet still lands on the right side of the sort and of the KPI count.
   rest is folded behind **show more**
 - **which session this is** — the card is headed by the **session's own name** (`hx-anon`,
   `claude-sdlc-kit-c3`), because that is what tells two sessions in one repository apart. Under
-  it the checkout: `<repo>:<branch>`, and a linked worktree on a line of its own as
-  `wt:<worktree>` — the repository is the one the worktree belongs to, not the directory name
+  it the checkout, a line each: the repository, the branch, and — only for a linked worktree —
+  `wt:<worktree>`. The repository is the one the worktree belongs to, not the directory name
 - **status** — needs you / busy / idle, pid, kind (interactive/background), model
 - **tokens** — output, input, cache read/write, thinking; context window occupancy
 - **folded away** — subagents, turns, input tokens, thinking, cache read/write, plan tier.
