@@ -29,6 +29,20 @@ CONFIG = Path.home() / ".claude.json"
 NOTIFY = Path.home() / ".claude" / "monitor" / "notify"
 SUBAGENT_ACTIVE_SEC = 60
 
+# Safari's "Add to Dock" turns the dashboard into a standalone app, and takes its name
+# and its icon from the manifest below - the <title> is no good for the name, it carries
+# the count of sessions waiting on you. The artwork lives next to this script; see
+# tools/make_icon.py.
+APP_NAME = "Claudemon"
+ASSETS = Path(__file__).resolve().parent.parent / "assets"
+STATIC = {
+    "/icon.svg": ("icon.svg", "image/svg+xml"),
+    "/icon-32.png": ("icon-32.png", "image/png"),
+    "/icon-180.png": ("icon-180.png", "image/png"),
+    "/icon-512.png": ("icon-512.png", "image/png"),
+    "/icon-1024.png": ("icon-1024.png", "image/png"),
+}
+
 # `claude agents --json` -> waitingFor
 WAITING_LABELS = {"input needed": "waiting for your input"}
 # Notification hook matchers (see hooks/notification.py)
@@ -694,7 +708,15 @@ def waiting_count(sessions: list[dict]) -> int:
 
 
 PAGE = r"""<!doctype html>
-<meta charset="utf-8"><title>Claude agents</title>
+<meta charset="utf-8"><title>Claudemon</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/icon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<meta name="application-name" content="Claudemon">
+<meta name="apple-mobile-web-app-title" content="Claudemon">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#191817">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f5f1">
 <style>
 /* Two palettes, one set of names. `data-theme` on the root always names the theme that
    is actually painted - "dark" or "light", never "system" - so which of the two the system
@@ -843,7 +865,7 @@ document.documentElement.dataset.theme = _th === "light" || _th === "dark" ? _th
   <button class="th" onclick="cycleTheme()"></button>
   <span class="ver">__VERSION__</span>
 </div>
-<h1>Claude agents dashboard</h1>
+<h1>Claudemon</h1>
 <div class="sub" id="sub">loading…</div>
 <div class="tabs">
   <button class="tab on" data-v="sessions" onclick="setView('sessions')">sessions</button>
@@ -1186,7 +1208,7 @@ async function tickBacklog(){
   const d = await (await fetch("/api/backlog")).json();
   stamp();
   document.getElementById("backlog").innerHTML = board(d);
-  document.title = (d.waiting ? `(${d.waiting}) ` : "") + "Claude agents";
+  document.title = (d.waiting ? `(${d.waiting}) ` : "") + "Claudemon";
 }
 
 async function tick(){
@@ -1213,7 +1235,7 @@ async function tick(){
       + `<button class="more" onclick="toggleKpis()"><i>\u2192</i><span>show more</span></button>`;
     paintKpiFold();
     document.getElementById("grid").innerHTML = d.sessions.map(s => card(s, now)).join("");
-    document.title = (T.waiting ? `(${T.waiting}) ` : "") + "Claude agents";
+    document.title = (T.waiting ? `(${T.waiting}) ` : "") + "Claudemon";
   } catch (e) {
     document.getElementById("sub").textContent = "connection to the server failed: " + e;
   }
@@ -1224,6 +1246,23 @@ arm();
 </script>
 """
 PAGE = PAGE.replace("__VERSION__", code_version())
+
+MANIFEST = json.dumps({
+    "id": "/",
+    "name": APP_NAME,
+    "short_name": APP_NAME,
+    "description": "Live dashboard of every Claude Code session on this machine.",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "background_color": "#191817",
+    "theme_color": "#191817",
+    "icons": [
+        {"src": "/icon-180.png", "sizes": "180x180", "type": "image/png"},
+        {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
+        {"src": "/icon-1024.png", "sizes": "1024x1024", "type": "image/png"},
+    ],
+})
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1241,6 +1280,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.host_ok():
             self.send_error(403)
             return
+        cache = "no-store"
         if self.path.startswith("/api/state"):
             with _lock:
                 body = json.dumps(build_state()).encode()
@@ -1251,13 +1291,25 @@ class Handler(BaseHTTPRequestHandler):
             ctype = "application/json"
         elif self.path in ("/", "/index.html"):
             body, ctype = PAGE.encode(), "text/html; charset=utf-8"
+        elif self.path == "/manifest.webmanifest":
+            body, ctype = MANIFEST.encode(), "application/manifest+json"
+            cache = "max-age=3600"
+        elif self.path in STATIC:
+            # an exact route per file, so nothing here can be talked into walking the disk
+            name, ctype = STATIC[self.path]
+            try:
+                body = (ASSETS / name).read_bytes()
+            except OSError:  # the script was copied out of the plugin without its artwork
+                self.send_error(404)
+                return
+            cache = "max-age=86400"
         else:
             self.send_error(404)
             return
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(body)
 

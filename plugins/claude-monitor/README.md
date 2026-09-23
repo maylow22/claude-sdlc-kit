@@ -16,7 +16,7 @@ tools/restart.sh [port]        # kill the running instance and start a fresh one
 A session blocked on your input goes **to the top, ahead of the other cards**, gets an orange
 frame with a pulse, a `needs you` pill and a line with the reason and how long it has been
 waiting. The count of such sessions is in the KPIs and in the page `<title>`
-(`(2) Claude agents`) — so you see it even on an inactive browser tab.
+(`(2) Claudemon`) — so you see it even on an inactive browser tab.
 
 The reason comes from two sources:
 
@@ -28,6 +28,43 @@ The reason comes from two sources:
 The hook writes `~/.claude/monitor/notify/<sessionId>.json`; the dashboard treats it as valid
 until the transcript moves past it — a user's answer means a write to the transcript, and that
 is what ages the record out.
+
+## Claudemon in the Dock
+
+Safari turns the dashboard into a standalone app: open it and pick **File → Add to Dock**. The
+app is called **Claudemon** and gets its own icon — a Claude burst with a pulse trace rising
+into the gap between its lower rays, on the dashboard's own dark warm ground.
+
+The name comes from the web app manifest, not from the `<title>`: the title carries the count
+of sessions waiting on you (`(2) Claudemon`), which is exactly what you do not want engraved
+under a Dock icon.
+
+| Route | What it is for |
+|---|---|
+| `/manifest.webmanifest` | the app's name, its icons, `display: standalone`, the window's background |
+| `/icon-180.png` | `apple-touch-icon` — what Safari falls back on without a manifest |
+| `/icon-512.png`, `/icon-1024.png` | the Dock and Launchpad sizes |
+| `/icon.svg`, `/icon-32.png` | the browser tab |
+
+`127.0.0.1` counts as a **secure context**, so a manifest over plain HTTP is honoured here the
+way it would be over HTTPS anywhere else — no certificate needed.
+
+### Regenerating the artwork
+
+`tools/make_icon.py` owns the geometry; `assets/icon.svg` and the PNGs are its output and are
+committed, so nothing has to be built to run the dashboard. There is no SVG rasterizer to
+depend on, which is why it takes two steps:
+
+```
+tools/make_icon.py svg                 # geometry -> assets/icon.svg
+# render assets/icon.svg to a 1024x1024 PNG (any browser: open it at 1024 CSS px and shoot)
+tools/make_icon.py png shot.png        # -> assets/icon-{1024,512,180,32}.png
+```
+
+The second step does what the SVG cannot do for itself: it cuts the square render to the Apple
+squircle, lays the top rim light along that same curve, and box-filters the master down. The
+corners come out **transparent**, so the icon looks right whether or not the system masks it
+again on top.
 
 ## Jumping to the session
 
@@ -214,6 +251,9 @@ whether the file is small or several megabytes.
 - The spinner marking a ticket as taken up needs the ticket to **carry its branch in a field**.
   `/feature:start` writes that line when it creates the branch; a ticket started by hand, or one
   filed before that was the habit, stays unmarked — the board just does not know.
+- The Dock icon is read **once**, when you add the app. Changing `assets/` afterwards does not
+  reach an app already in the Dock — remove it and add it again. The icons are served with
+  `max-age=86400`, so a browser tab wants a hard reload too.
 - Every route, the page included, requires a `Host` of exactly **`127.0.0.1:<port>` or
   `localhost:<port>`** — on `--port 80` the bare `127.0.0.1` or `localhost` as well, because
   the browser omits the scheme's default port. That is what stops DNS rebinding, and it has no

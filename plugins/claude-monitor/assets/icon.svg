@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<title>Claudemon</title>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#2a2320"/>
+    <stop offset=".52" stop-color="#191514"/>
+    <stop offset="1" stop-color="#100e0d"/>
+  </linearGradient>
+  <radialGradient id="glow" cx="512" cy="436" r="360" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#d97757" stop-opacity=".34"/>
+    <stop offset=".5" stop-color="#d97757" stop-opacity=".10"/>
+    <stop offset="1" stop-color="#d97757" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="mark" x1="0" y1="144.0" x2="0" y2="728.0" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#f8ad8b"/>
+    <stop offset=".5" stop-color="#e57e53"/>
+    <stop offset="1" stop-color="#c9552d"/>
+  </linearGradient>
+  <!-- the flat run is a dim trace; only the beat under the mark is live -->
+  <linearGradient id="sig" x1="240" y1="0" x2="784" y2="0" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#ffb02e" stop-opacity="0"/>
+    <stop offset=".07" stop-color="#ffb02e" stop-opacity=".60"/>
+    <stop offset=".31" stop-color="#ffb02e" stop-opacity=".60"/>
+    <stop offset=".38" stop-color="#ffc24e" stop-opacity="1"/>
+    <stop offset=".60" stop-color="#ffc24e" stop-opacity="1"/>
+    <stop offset=".67" stop-color="#ffb02e" stop-opacity=".60"/>
+    <stop offset=".93" stop-color="#ffb02e" stop-opacity=".60"/>
+    <stop offset="1" stop-color="#ffb02e" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="lift" x="-30%" y="-30%" width="160%" height="160%">
+    <feDropShadow dx="0" dy="7" stdDeviation="11" flood-color="#0b0807" flood-opacity=".5"/>
+  </filter>
+</defs>
+<rect width="1024" height="1024" fill="url(#bg)"/>
+<rect width="1024" height="1024" fill="url(#glow)"/>
+<path d="M 240 802 H 440 L 466 822 L 508 672 L 540 868 L 568 802 H 784" fill="none" stroke="url(#sig)" stroke-width="24"
+      stroke-linecap="round" stroke-linejoin="round"/>
+<g filter="url(#lift)">
+  <path d="M 512.0 396.0 L 512.0 164.0 M 490.4 402.3 L 364.9 207.2 M 475.6 419.4 L 264.6 323.0 M 472.4 441.7 L 242.8 474.7 M 481.8 462.2 L 306.4 614.1 M 500.7 474.4 L 435.4 697.0 M 523.3 474.4 L 588.6 697.0 M 542.2 462.2 L 717.6 614.1 M 551.6 441.7 L 781.2 474.7 M 548.4 419.4 L 759.4 323.0 M 533.6 402.3 L 659.1 207.2" fill="none" stroke="url(#mark)" stroke-width="40.0" stroke-linecap="round"/>
+  <circle cx="512" cy="436" r="44.0" fill="url(#mark)"/>
+</g>
+</svg>
