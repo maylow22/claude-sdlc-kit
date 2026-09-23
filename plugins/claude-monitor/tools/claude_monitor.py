@@ -347,6 +347,127 @@ def git_branch(cwd: str, cache: dict[str, str | None]) -> str | None:
     return b
 
 
+# The hosts whose web address is a plain https://<host>/<owner>/<repo> of the remote, in
+# every form git writes one. Nothing is guessed for a host that is not listed - a link that
+# opens the wrong page is worse than a repository name that is not a link at all.
+WEB_HOSTS = ("github.com", "bitbucket.org")
+REMOTE_RE = re.compile(r"^(?:(?:https|ssh|git)://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?$")
+OWNER_REPO_RE = re.compile(r"[\w.-]+/[\w.-]+")
+
+
+def web_url(remote: str) -> str | None:
+    """https://<host>/<owner>/<repo> out of `git@github.com:owner/repo.git`,
+    `https://bitbucket.org/team/repo.git` or `ssh://git@github.com/owner/repo`. The
+    address is built from the host and the path, never passed through from the remote:
+    whatever the config holds, what reaches the page is a URL this function composed."""
+    m = REMOTE_RE.match(remote.strip())
+    if not m:
+        return None
+    host, path = m.group(1).lower(), m.group(2)
+    if host not in WEB_HOSTS or not OWNER_REPO_RE.fullmatch(path):
+        return None
+    return f"https://{host}/{path}"
+
+
+def git_repo(
+    cwd: str, cache: dict[str, tuple[str, str | None, str | None]]
+) -> tuple[str, str | None, str | None]:
+    """(repository, worktree) of the working directory. A linked worktree is a directory of
+    its own - `claude-sdlc-kit-BL-11` beside `claude-sdlc-kit` - so the basename of the cwd
+    names the checkout, not the repository; what the two share is the common git dir.
+
+    That dir only names the repository when it is the repository's own `.git`: a submodule
+    and a bare repo keep theirs elsewhere, and those are repositories in their own right, so
+    their toplevel is the answer. Outside a repository there is only the directory.
+
+    The third value is the web address of `origin`, where the host has one this knows."""
+    if cwd in cache:
+        return cache[cwd]
+    repo, wt, url = os.path.basename(cwd) or "?", None, None
+    try:
+        r = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--path-format=absolute",
+             "--show-toplevel", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if r.returncode == 0:
+            top, _, common = r.stdout.strip().partition("\n")
+            root = os.path.dirname(common) if common.endswith("/.git") else top
+            if root:
+                repo = os.path.basename(root) or repo
+                if os.path.realpath(top) != os.path.realpath(root):
+                    wt = os.path.basename(top)
+            # a worktree shares the config, so origin is the repository's either way
+            r = subprocess.run(
+                ["git", "-C", cwd, "config", "--get", "remote.origin.url"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if r.returncode == 0:
+                url = web_url(r.stdout)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    cache[cwd] = (repo, wt, url)
+    return repo, wt, url
+
+
+# --- The pull request the branch has open, through `gh` ---
+# Asking is a network call, and a tick must never wait on one: build_state() reads the
+# cache and a worker fills it behind the answer it already gave. A branch therefore has
+# no badge on the tick it first appears on, and one on the next.
+PR_TTL = 180  # a PR is opened once - re-asking about a branch that has one is a formality
+PR_MISS_TTL = 900  # most branches never get one, and that answer is the expensive one
+_pr: dict[tuple[str, str], dict | None] = {}
+_pr_at: dict[tuple[str, str], float] = {}
+_pr_busy: set[tuple[str, str]] = set()
+_pr_lock = threading.Lock()
+_gh_ok = True  # a machine without `gh` says so once, and is not asked again
+
+
+def _pr_fetch(key: tuple[str, str], cwd: str, branch: str) -> None:
+    global _gh_ok
+    pr = None
+    try:
+        r = subprocess.run(
+            ["gh", "pr", "list", "--head", branch, "--state", "open",
+             "--json", "number,url", "--limit", "1"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if r.returncode == 0:
+            for got in json.loads(r.stdout or "[]")[:1]:
+                pr = {"number": got["number"], "url": got["url"]}
+    except FileNotFoundError:
+        _gh_ok = False
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        pass  # not logged in, no remote access, a repo gh does not host - all the same here
+    with _pr_lock:
+        _pr[key] = pr
+        _pr_at[key] = time.time()
+        _pr_busy.discard(key)
+
+
+def pull_request(cwd: str, branch: str | None, url: str | None) -> dict | None:
+    """The open PR of the branch, from a cache the worker above keeps warm. Only for a
+    github.com remote: `gh` is the one forge CLI that may be lying around, and asking it
+    about a repository it does not host is a slow way to be told no."""
+    if not (_gh_ok and branch and url and url.startswith("https://github.com/")):
+        return None
+    key = (cwd, branch)
+    with _pr_lock:
+        pr = _pr.get(key)
+        if time.time() - _pr_at.get(key, 0) > (PR_TTL if pr else PR_MISS_TTL) \
+                and key not in _pr_busy:
+            _pr_busy.add(key)
+            threading.Thread(target=_pr_fetch, args=(key, cwd, branch), daemon=True).start()
+        return pr
+
+
 # The .app that a process ultimately belongs to - "Cursor" out of
 # /Applications/Cursor.app/Contents/MacOS/Cursor.
 APP_RE = re.compile(r"/([^/]+)\.app/Contents/MacOS/")
@@ -555,6 +676,7 @@ def working(status: str | None) -> bool:
 def build_state() -> dict:
     sessions = []
     branches: dict[str, str | None] = {}
+    repos: dict[str, tuple[str, str | None, str | None]] = {}
     procs = proc_table()
     # `waitingFor` only ever arrives for the session the server itself runs in, so it is
     # an overlay on the registry rather than the list itself
@@ -571,6 +693,8 @@ def build_state() -> dict:
             mtime = 0
         subs = subagents(path, sid) if path else []
         branch = git_branch(s.get("cwd", ""), branches) or t["branch"]
+        repo, worktree, repo_url = git_repo(s.get("cwd", ""), repos)
+        pr = pull_request(s.get("cwd", ""), branch, repo_url)
         att = attention(s, sid, mtime)
         if att:  # only a waiting session shows what it last said
             att["lastAgent"] = t["last_agent"]
@@ -583,9 +707,12 @@ def build_state() -> dict:
                 "status": s.get("status"),
                 "attention": att,
                 "cwd": s.get("cwd", ""),
-                "project": os.path.basename(s.get("cwd", "")) or "?",
+                "repo": repo,
+                "repoUrl": repo_url,
+                "worktree": worktree,
                 "startedAt": s.get("startedAt"),
                 "branch": branch,
+                "pr": pr,
                 "model": t["model"],
                 "effort": t["effort"],
                 "turns": t["turns"],
@@ -849,7 +976,7 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
   .card.att{animation:none}
   .spin{animation:none;border-top-color:currentColor}
 }
-.head{display:flex;align-items:baseline;gap:8px;margin-bottom:2px}
+.head{display:flex;align-items:baseline;gap:8px;margin-bottom:2px;flex-wrap:wrap}
 .head h2{font-size:14px;margin:0;font-weight:620;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .go{font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);
     background:none;color:var(--dim);font:inherit;font-size:10px;text-transform:uppercase;
@@ -859,7 +986,17 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .card.att .go{border-color:var(--att);color:var(--att-ink)}
 .pill{font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid currentColor;
       text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.det-only{display:none}
+.card.det .det-only{display:revert}
+.foot{display:flex;justify-content:flex-end;margin-top:4px;margin-bottom:-4px}
+.i{border:none;background:none;padding:0;line-height:1;font-size:14px;
+   color:var(--dim);cursor:pointer;opacity:.7}
+.i:hover,.card.det .i{color:var(--busy);opacity:1}
+.card.att .i{color:var(--att-ink)}
 .pill.busy{color:var(--busy)}.pill.idle{color:var(--idle)}
+.pill.pr{color:var(--bar);text-decoration:none;white-space:nowrap;
+         font-variant-numeric:tabular-nums}
+.pill.pr:hover{background:var(--bar);border-color:var(--bar);color:var(--card)}
 .spin{display:inline-block;vertical-align:-1px;width:8px;height:8px;margin-right:5px;
       border:1.5px solid currentColor;border-top-color:transparent;border-radius:99px;
       animation:spin .8s linear infinite}
@@ -875,11 +1012,18 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .att-row .say.open{display:block;white-space:pre-wrap}
 .att-row .say.open::before{content:"\25b4 "}
 .kpi.att b{color:var(--att-ink)}
-.branch{font-size:12px;font-weight:560;color:var(--fg);opacity:.75;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.repo,.branch,.wt{font-size:12px;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.repo,.branch{color:var(--fg);opacity:.75}
+.repo{font-weight:460}
+.repo a{color:inherit;text-decoration:none;border-bottom:1px dotted currentColor}
+.repo a:hover{color:var(--busy);border-bottom-style:solid}
+.branch{font-weight:620}
+.wt{font-size:11.5px;color:var(--dim)}
 .meta{color:var(--dim);font-size:12px;margin-bottom:9px}
 .bar{height:5px;background:var(--bar2);border-radius:99px;overflow:hidden;margin:3px 0 5px}
 .bar>i{display:block;height:100%;background:var(--bar)}
-.toks{display:grid;grid-template-columns:1fr 1fr;gap:1px 12px;font-size:12px;color:var(--dim)}
+.toks{display:grid;grid-template-columns:1fr;gap:1px 12px;font-size:12px;color:var(--dim)}
+.card.det .toks{grid-template-columns:1fr 1fr}
 .toks b{color:var(--fg);font-weight:550;font-variant-numeric:tabular-nums;float:right}
 .subs{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
 .subs>div{display:flex;gap:7px;align-items:baseline;font-size:12px;padding:2px 0}
@@ -1060,9 +1204,18 @@ function planKpis(u, now){
 
 // same reason as the KPI fold: the cards are rebuilt every tick
 const expanded = new Set();  // sessions whose last agent message is unfolded
+const details = new Set();   // sessions whose card shows more than the headline
 document.getElementById("grid").addEventListener("click", ev => {
   const go = ev.target.closest(".go");
   if(go){ focusSession(go); return; }
+  const inf = ev.target.closest("[data-det]");
+  if(inf){
+    const sid = inf.dataset.det;
+    details.has(sid) ? details.delete(sid) : details.add(sid);
+    // the class right away, the set for the repaint a tick later
+    inf.closest(".card").classList.toggle("det");
+    return;
+  }
   const el = ev.target.closest(".say");
   if(!el) return;
   const sid = el.dataset.sid;
@@ -1106,28 +1259,37 @@ function card(s, now){
       ${said ? `<div class="say${expanded.has(s.sessionId) ? " open" : ""}"
         data-sid="${esc(s.sessionId)}" title="click to expand">${esc(said.text)}</div>` : ""
       }</div>` : "";
-  return `<div class="card ${st}">
-    <div class="head"><h2>${esc(s.project)}</h2>
+  return `<div class="card ${st}${details.has(s.sessionId) ? " det" : ""}">
+    <div class="head"><h2>${esc(s.name)}</h2>
       ${s.host ? `<button class="go" data-pid="${s.pid}" data-cwd="${esc(s.cwd)}"
         title="bring the ${esc(s.host)} window running this session to the front"
         >&#8599; ${esc(s.host)}</button>` : ""}
+      ${s.pr ? `<a class="pill pr" href="${esc(s.pr.url)}" target="_blank" rel="noreferrer"
+        title="${esc(s.pr.url)}">PR #${esc(String(s.pr.number))}</a>` : ""}
       <span class="pill ${st}">${st === "busy" ? '<i class="spin"></i>' : ""}${
         a ? "needs you" : st}</span></div>
+    <div class="repo">${s.repoUrl
+      ? `<a href="${esc(s.repoUrl)}" target="_blank" rel="noreferrer"
+          title="${esc(s.repoUrl)}">${esc(s.repo)}</a>` : esc(s.repo)}</div>
     ${s.branch ? `<div class="branch">${esc(s.branch)}</div>` : ""}
-    <div class="meta">${esc(s.kind)}
-      · pid ${s.pid} · ${esc(s.name)} · ${esc(s.model||"?")}${s.effort?" / "+esc(s.effort):""}
-      <br>${s.turns} turns · active ${ago(s.mtime, now)} ago</div>
+    ${s.worktree ? `<div class="wt">wt:${esc(s.worktree)}</div>` : ""}
+    <div class="meta">${esc(s.model||"?")}${s.effort?" / "+esc(s.effort):""}
+      <span class="det-only"> &middot; ${esc(s.kind)} &middot; pid ${s.pid}
+      <br>${s.turns} turns &middot; active ${ago(s.mtime, now)} ago</span></div>
     ${att}
     <div class="bar"><i style="width:${pct}%"></i></div>
     <div class="toks">
       <div>context <b>${n(s.context)} / ${n(s.contextLimit)}</b></div>
-      <div>output <b>${n(t.output)}</b></div>
-      <div>cache read <b>${n(t.cache_read)}</b></div>
-      <div>cache write <b>${n(t.cache_write)}</b></div>
-      <div>input <b>${n(t.input)}</b></div>
-      <div>thinking <b>${n(t.thinking)}</b></div>
+      <div class="det-only">output <b>${n(t.output)}</b></div>
+      <div class="det-only">cache read <b>${n(t.cache_read)}</b></div>
+      <div class="det-only">cache write <b>${n(t.cache_write)}</b></div>
+      <div class="det-only">input <b>${n(t.input)}</b></div>
+      <div class="det-only">thinking <b>${n(t.thinking)}</b></div>
     </div>
     ${subs ? `<div class="subs">${subs}</div>` : ""}
+    <div class="foot"><button class="i" data-det="${esc(s.sessionId)}"
+      title="kind, pid, turns, when it was last active and the token breakdown"
+      >&#9432;</button></div>
   </div>`;
 }
 

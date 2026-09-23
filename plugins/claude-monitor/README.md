@@ -190,8 +190,20 @@ yet still lands on the right side of the sort and of the KPI count.
   percent tiles with a thin bar, the active limit framed; the long label, the countdown to the
   reset and the age of the usage cache are in the tooltip. Then the counts and the few token numbers that matter; the
   rest is folded behind **show more**
-- **status** — needs you / busy / idle, pid, kind (interactive/background), project, live git branch
-- **tokens** — output, input, cache read/write, thinking; context window occupancy
+- **which session this is** — the card is headed by the **session's own name** (`hx-anon`,
+  `claude-sdlc-kit-c3`), because that is what tells two sessions in one repository apart. Under
+  it the checkout, a line each: the repository, the branch, and — only for a linked worktree —
+  `wt:<worktree>`. The repository is the one the worktree belongs to, not the directory name,
+  and it is a **link to `origin`** where that remote is on GitHub or Bitbucket
+- **status** — needs you / busy / idle, and the model the session runs on
+- **`PR #836`** — a badge beside the status pill when the branch has a pull request open,
+  linking straight to it. GitHub only, through `gh`; without `gh`, or logged out, no badge
+  appears and nothing else changes
+- **tokens** — how full the context window is, as a bar and as `used / limit`
+- **the ⓘ on the card** — everything the headline leaves out, folded away until you tap it:
+  kind (interactive/background), pid, turns, how long ago the session was last active, and
+  the token breakdown (output, input, cache read/write, thinking). It is per card, and the
+  card keeps it open across the repaint every refresh does
 - **folded away** — subagents, turns, input tokens, thinking, cache read/write, plan tier.
   Always visible instead: sessions, busy, need you, context total, output tokens and **cache
   hit** (the share of the input side served from the cache — what keeps a long session cheap)
@@ -296,6 +308,9 @@ not run the dashboard (`CLAUDE_MONITOR_AUTOSTART=0`).
 | tokens, model, effort | `~/.claude/projects/<slug>/<sessionId>.jsonl` → `.message.usage` |
 | subagent tree | `<sessionId>/subagents/agent-*.meta.json` |
 | git branch | `git -C <cwd> branch --show-current` (live — the transcript's copy tends to be stale) |
+| repository + worktree | `git -C <cwd> rev-parse --show-toplevel --git-common-dir` — the common git dir is what a linked worktree shares with its repository |
+| the link on the repository | `git -C <cwd> config --get remote.origin.url` → `https://<host>/<owner>/<repo>`, composed rather than passed through, and only for `github.com` and `bitbucket.org`; any other host stays plain text |
+| the `PR #…` badge | `gh pr list --head <branch> --state open` in the session's `cwd` — a network call, so a worker thread makes it and the tick reads a cache (a hit is re-asked after 3 min, a miss after 15); the badge appears a tick after the branch does |
 | plan usage tiles | `~/.claude.json` → `cachedUsageUtilization` (the cache `/usage` fills) |
 | restart + URL into the session | `hooks/session-start.sh` → `tools/restart.sh` (SessionStart hook) |
 | the reason for waiting on the user | `hooks/notification.py` → `~/.claude/monitor/notify/<sessionId>.json` |
