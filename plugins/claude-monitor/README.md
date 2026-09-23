@@ -196,6 +196,9 @@ yet still lands on the right side of the sort and of the KPI count.
   `wt:<worktree>`. The repository is the one the worktree belongs to, not the directory name,
   and it is a **link to `origin`** where that remote is on GitHub or Bitbucket
 - **status** — needs you / busy / idle, and the model the session runs on
+- **`PR #836`** — a badge beside the status pill when the branch has a pull request open,
+  linking straight to it. GitHub only, through `gh`; without `gh`, or logged out, no badge
+  appears and nothing else changes
 - **tokens** — how full the context window is, as a bar and as `used / limit`
 - **the ⓘ on the card** — everything the headline leaves out, folded away until you tap it:
   kind (interactive/background), pid, turns, how long ago the session was last active, and
@@ -307,6 +310,7 @@ not run the dashboard (`CLAUDE_MONITOR_AUTOSTART=0`).
 | git branch | `git -C <cwd> branch --show-current` (live — the transcript's copy tends to be stale) |
 | repository + worktree | `git -C <cwd> rev-parse --show-toplevel --git-common-dir` — the common git dir is what a linked worktree shares with its repository |
 | the link on the repository | `git -C <cwd> config --get remote.origin.url` → `https://<host>/<owner>/<repo>`, composed rather than passed through, and only for `github.com` and `bitbucket.org`; any other host stays plain text |
+| the `PR #…` badge | `gh pr list --head <branch> --state open` in the session's `cwd` — a network call, so a worker thread makes it and the tick reads a cache (a hit is re-asked after 3 min, a miss after 15); the badge appears a tick after the branch does |
 | plan usage tiles | `~/.claude.json` → `cachedUsageUtilization` (the cache `/usage` fills) |
 | restart + URL into the session | `hooks/session-start.sh` → `tools/restart.sh` (SessionStart hook) |
 | the reason for waiting on the user | `hooks/notification.py` → `~/.claude/monitor/notify/<sessionId>.json` |

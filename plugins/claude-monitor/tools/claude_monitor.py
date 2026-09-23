@@ -414,6 +414,60 @@ def git_repo(
     return repo, wt, url
 
 
+# --- The pull request the branch has open, through `gh` ---
+# Asking is a network call, and a tick must never wait on one: build_state() reads the
+# cache and a worker fills it behind the answer it already gave. A branch therefore has
+# no badge on the tick it first appears on, and one on the next.
+PR_TTL = 180  # a PR is opened once - re-asking about a branch that has one is a formality
+PR_MISS_TTL = 900  # most branches never get one, and that answer is the expensive one
+_pr: dict[tuple[str, str], dict | None] = {}
+_pr_at: dict[tuple[str, str], float] = {}
+_pr_busy: set[tuple[str, str]] = set()
+_pr_lock = threading.Lock()
+_gh_ok = True  # a machine without `gh` says so once, and is not asked again
+
+
+def _pr_fetch(key: tuple[str, str], cwd: str, branch: str) -> None:
+    global _gh_ok
+    pr = None
+    try:
+        r = subprocess.run(
+            ["gh", "pr", "list", "--head", branch, "--state", "open",
+             "--json", "number,url", "--limit", "1"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if r.returncode == 0:
+            for got in json.loads(r.stdout or "[]")[:1]:
+                pr = {"number": got["number"], "url": got["url"]}
+    except FileNotFoundError:
+        _gh_ok = False
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        pass  # not logged in, no remote access, a repo gh does not host - all the same here
+    with _pr_lock:
+        _pr[key] = pr
+        _pr_at[key] = time.time()
+        _pr_busy.discard(key)
+
+
+def pull_request(cwd: str, branch: str | None, url: str | None) -> dict | None:
+    """The open PR of the branch, from a cache the worker above keeps warm. Only for a
+    github.com remote: `gh` is the one forge CLI that may be lying around, and asking it
+    about a repository it does not host is a slow way to be told no."""
+    if not (_gh_ok and branch and url and url.startswith("https://github.com/")):
+        return None
+    key = (cwd, branch)
+    with _pr_lock:
+        pr = _pr.get(key)
+        if time.time() - _pr_at.get(key, 0) > (PR_TTL if pr else PR_MISS_TTL) \
+                and key not in _pr_busy:
+            _pr_busy.add(key)
+            threading.Thread(target=_pr_fetch, args=(key, cwd, branch), daemon=True).start()
+        return pr
+
+
 # The .app that a process ultimately belongs to - "Cursor" out of
 # /Applications/Cursor.app/Contents/MacOS/Cursor.
 APP_RE = re.compile(r"/([^/]+)\.app/Contents/MacOS/")
@@ -640,6 +694,7 @@ def build_state() -> dict:
         subs = subagents(path, sid) if path else []
         branch = git_branch(s.get("cwd", ""), branches) or t["branch"]
         repo, worktree, repo_url = git_repo(s.get("cwd", ""), repos)
+        pr = pull_request(s.get("cwd", ""), branch, repo_url)
         att = attention(s, sid, mtime)
         if att:  # only a waiting session shows what it last said
             att["lastAgent"] = t["last_agent"]
@@ -657,6 +712,7 @@ def build_state() -> dict:
                 "worktree": worktree,
                 "startedAt": s.get("startedAt"),
                 "branch": branch,
+                "pr": pr,
                 "model": t["model"],
                 "effort": t["effort"],
                 "turns": t["turns"],
@@ -920,7 +976,7 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
   .card.att{animation:none}
   .spin{animation:none;border-top-color:currentColor}
 }
-.head{display:flex;align-items:baseline;gap:8px;margin-bottom:2px}
+.head{display:flex;align-items:baseline;gap:8px;margin-bottom:2px;flex-wrap:wrap}
 .head h2{font-size:14px;margin:0;font-weight:620;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .go{font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);
     background:none;color:var(--dim);font:inherit;font-size:10px;text-transform:uppercase;
@@ -937,6 +993,9 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .i:hover,.card.det .i{color:var(--busy);opacity:1}
 .card.att .i{color:var(--att-ink)}
 .pill.busy{color:var(--busy)}.pill.idle{color:var(--idle)}
+.pill.pr{color:var(--bar);text-decoration:none;white-space:nowrap;
+         font-variant-numeric:tabular-nums}
+.pill.pr:hover{background:var(--bar);border-color:var(--bar);color:var(--card)}
 .spin{display:inline-block;vertical-align:-1px;width:8px;height:8px;margin-right:5px;
       border:1.5px solid currentColor;border-top-color:transparent;border-radius:99px;
       animation:spin .8s linear infinite}
@@ -1204,6 +1263,8 @@ function card(s, now){
       ${s.host ? `<button class="go" data-pid="${s.pid}" data-cwd="${esc(s.cwd)}"
         title="bring the ${esc(s.host)} window running this session to the front"
         >&#8599; ${esc(s.host)}</button>` : ""}
+      ${s.pr ? `<a class="pill pr" href="${esc(s.pr.url)}" target="_blank" rel="noreferrer"
+        title="${esc(s.pr.url)}">PR #${esc(String(s.pr.number))}</a>` : ""}
       <span class="pill ${st}">${st === "busy" ? '<i class="spin"></i>' : ""}${
         a ? "needs you" : st}</span>
       <button class="i" data-det="${esc(s.sessionId)}"
