@@ -85,3 +85,19 @@ component inventory and token cost, `claude plugin tag` cuts a release tag `{nam
 
 For quick iteration without publishing, symlink the plugin into `~/.claude/skills/` — it
 auto-loads as `<name>@skills-dir`.
+
+### Versioning
+
+Every PR that touches `plugins/<name>/` raises that plugin's `version` in
+`plugins/<name>/.claude-plugin/plugin.json`. An install is cached per version —
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>` — so a change merged without a new
+one never reaches anybody who already has the plugin: the marketplace metadata refreshes, the
+files do not. `.github/workflows/plugin-version.yml` is the gate, and the same check runs
+locally:
+
+```bash
+.github/scripts/check_plugin_versions.py main
+```
+
+After the merge an existing install picks the new version up with
+`claude plugin update <plugin>@claude-kit`, applied on the next restart.

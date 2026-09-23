@@ -9,6 +9,7 @@ symptom is silent, which is why this is a gate rather than a note in a checklist
     .github/scripts/check_plugin_versions.py <base-ref> [head-ref]
     .github/scripts/check_plugin_versions.py main          # locally, before opening the PR
 
+It compares committed trees, the way CI sees them, so commit the bump before running it.
 A plugin being added or removed is not a bump; both pass.
 """
 
