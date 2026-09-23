@@ -347,6 +347,38 @@ def git_branch(cwd: str, cache: dict[str, str | None]) -> str | None:
     return b
 
 
+def git_repo(cwd: str, cache: dict[str, tuple[str, str | None]]) -> tuple[str, str | None]:
+    """(repository, worktree) of the working directory. A linked worktree is a directory of
+    its own - `claude-sdlc-kit-BL-11` beside `claude-sdlc-kit` - so the basename of the cwd
+    names the checkout, not the repository; what the two share is the common git dir.
+
+    That dir only names the repository when it is the repository's own `.git`: a submodule
+    and a bare repo keep theirs elsewhere, and those are repositories in their own right, so
+    their toplevel is the answer. Outside a repository there is only the directory."""
+    if cwd in cache:
+        return cache[cwd]
+    repo, wt = os.path.basename(cwd) or "?", None
+    try:
+        r = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--path-format=absolute",
+             "--show-toplevel", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if r.returncode == 0:
+            top, _, common = r.stdout.strip().partition("\n")
+            root = os.path.dirname(common) if common.endswith("/.git") else top
+            if root:
+                repo = os.path.basename(root) or repo
+                if os.path.realpath(top) != os.path.realpath(root):
+                    wt = os.path.basename(top)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    cache[cwd] = (repo, wt)
+    return repo, wt
+
+
 # The .app that a process ultimately belongs to - "Cursor" out of
 # /Applications/Cursor.app/Contents/MacOS/Cursor.
 APP_RE = re.compile(r"/([^/]+)\.app/Contents/MacOS/")
@@ -555,6 +587,7 @@ def working(status: str | None) -> bool:
 def build_state() -> dict:
     sessions = []
     branches: dict[str, str | None] = {}
+    repos: dict[str, tuple[str, str | None]] = {}
     procs = proc_table()
     # `waitingFor` only ever arrives for the session the server itself runs in, so it is
     # an overlay on the registry rather than the list itself
@@ -571,6 +604,7 @@ def build_state() -> dict:
             mtime = 0
         subs = subagents(path, sid) if path else []
         branch = git_branch(s.get("cwd", ""), branches) or t["branch"]
+        repo, worktree = git_repo(s.get("cwd", ""), repos)
         att = attention(s, sid, mtime)
         if att:  # only a waiting session shows what it last said
             att["lastAgent"] = t["last_agent"]
@@ -583,7 +617,8 @@ def build_state() -> dict:
                 "status": s.get("status"),
                 "attention": att,
                 "cwd": s.get("cwd", ""),
-                "project": os.path.basename(s.get("cwd", "")) or "?",
+                "repo": repo,
+                "worktree": worktree,
                 "startedAt": s.get("startedAt"),
                 "branch": branch,
                 "model": t["model"],
@@ -875,7 +910,9 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .att-row .say.open{display:block;white-space:pre-wrap}
 .att-row .say.open::before{content:"\25b4 "}
 .kpi.att b{color:var(--att-ink)}
-.branch{font-size:12px;font-weight:560;color:var(--fg);opacity:.75;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.branch{font-size:12px;font-weight:460;color:var(--fg);opacity:.75;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.branch b{font-weight:620}
+.wt{font-size:11.5px;color:var(--dim);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .meta{color:var(--dim);font-size:12px;margin-bottom:9px}
 .bar{height:5px;background:var(--bar2);border-radius:99px;overflow:hidden;margin:3px 0 5px}
 .bar>i{display:block;height:100%;background:var(--bar)}
@@ -1107,15 +1144,16 @@ function card(s, now){
         data-sid="${esc(s.sessionId)}" title="click to expand">${esc(said.text)}</div>` : ""
       }</div>` : "";
   return `<div class="card ${st}">
-    <div class="head"><h2>${esc(s.project)}</h2>
+    <div class="head"><h2>${esc(s.name)}</h2>
       ${s.host ? `<button class="go" data-pid="${s.pid}" data-cwd="${esc(s.cwd)}"
         title="bring the ${esc(s.host)} window running this session to the front"
         >&#8599; ${esc(s.host)}</button>` : ""}
       <span class="pill ${st}">${st === "busy" ? '<i class="spin"></i>' : ""}${
         a ? "needs you" : st}</span></div>
-    ${s.branch ? `<div class="branch">${esc(s.branch)}</div>` : ""}
+    <div class="branch">${esc(s.repo)}${s.branch ? `:<b>${esc(s.branch)}</b>` : ""}</div>
+    ${s.worktree ? `<div class="wt">wt:${esc(s.worktree)}</div>` : ""}
     <div class="meta">${esc(s.kind)}
-      · pid ${s.pid} · ${esc(s.name)} · ${esc(s.model||"?")}${s.effort?" / "+esc(s.effort):""}
+      · pid ${s.pid} · ${esc(s.model||"?")}${s.effort?" / "+esc(s.effort):""}
       <br>${s.turns} turns · active ${ago(s.mtime, now)} ago</div>
     ${att}
     <div class="bar"><i style="width:${pct}%"></i></div>

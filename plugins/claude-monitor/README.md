@@ -190,7 +190,11 @@ yet still lands on the right side of the sort and of the KPI count.
   percent tiles with a thin bar, the active limit framed; the long label, the countdown to the
   reset and the age of the usage cache are in the tooltip. Then the counts and the few token numbers that matter; the
   rest is folded behind **show more**
-- **status** — needs you / busy / idle, pid, kind (interactive/background), project, live git branch
+- **which session this is** — the card is headed by the **session's own name** (`hx-anon`,
+  `claude-sdlc-kit-c3`), because that is what tells two sessions in one repository apart. Under
+  it the checkout: `<repo>:<branch>`, and a linked worktree on a line of its own as
+  `wt:<worktree>` — the repository is the one the worktree belongs to, not the directory name
+- **status** — needs you / busy / idle, pid, kind (interactive/background), model
 - **tokens** — output, input, cache read/write, thinking; context window occupancy
 - **folded away** — subagents, turns, input tokens, thinking, cache read/write, plan tier.
   Always visible instead: sessions, busy, need you, context total, output tokens and **cache
@@ -296,6 +300,7 @@ not run the dashboard (`CLAUDE_MONITOR_AUTOSTART=0`).
 | tokens, model, effort | `~/.claude/projects/<slug>/<sessionId>.jsonl` → `.message.usage` |
 | subagent tree | `<sessionId>/subagents/agent-*.meta.json` |
 | git branch | `git -C <cwd> branch --show-current` (live — the transcript's copy tends to be stale) |
+| repository + worktree | `git -C <cwd> rev-parse --show-toplevel --git-common-dir` — the common git dir is what a linked worktree shares with its repository |
 | plan usage tiles | `~/.claude.json` → `cachedUsageUtilization` (the cache `/usage` fills) |
 | restart + URL into the session | `hooks/session-start.sh` → `tools/restart.sh` (SessionStart hook) |
 | the reason for waiting on the user | `hooks/notification.py` → `~/.claude/monitor/notify/<sessionId>.json` |
