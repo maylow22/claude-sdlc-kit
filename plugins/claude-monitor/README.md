@@ -83,9 +83,17 @@ How precisely it lands depends on the app:
 
 | App | What it focuses | How |
 |---|---|---|
-| Terminal, iTerm2 | **the exact tab** | AppleScript — both publish the `tty` of every tab, and the session's tty comes from `ps` |
+| Terminal, iTerm2 | **the exact tab** | AppleScript — both publish the `tty` of every tab, and the session's tty comes from libproc |
+| Ghostty (1.3+) | **the tab of that directory** | AppleScript — its dictionary (new in 1.3) publishes the `working directory` of every terminal, not the tty, so two sessions in one directory land on whichever tab comes first |
 | Cursor, VS Code, Windsurf, Zed, … | **the window of that folder** | `open -a <app> <cwd>` — an editor keeps one window per open folder |
 | anything else | the app, whichever window was last on top | `tell application … to activate` |
+
+**If the button does nothing**, the dashboard is running where macOS gives it no Apple Event
+layer: a process Claude Code spawns — the SessionStart hook, `/claude-monitor:start` — is
+confined, and every `tell application` from it comes back `-600 Application isn't running`,
+System Events included. The button says so rather than showing the raw error. Start it from a
+terminal of your own instead (`tools/restart.sh`) and the same click works; the hook keeps the
+instance alive from then on.
 
 No Accessibility grant is needed anywhere (which is why `open -a` beats System Events for the
 editors). Under `tmux` or over ssh no app owns the session any more — there the button is not
@@ -316,7 +324,7 @@ not run the dashboard (`CLAUDE_MONITOR_AUTOSTART=0`).
 | the reason for waiting on the user | `hooks/notification.py` → `~/.claude/monitor/notify/<sessionId>.json` |
 | the backlog board | `BACKLOG.md` + `BACKLOG.done.md` in the repository root of an open session's `cwd` (parsed only when the file changes) |
 | which ticket is being worked on | `git branch --show-current` in each backlog project's root, matched against the ticket's field values (backticks stripped, compared whole) |
-| the app hosting a session | `ps -Ao pid,ppid,tty,command` — one call per refresh, the parent chain is walked in memory; where the process table is refused, no app is found and the button is simply not rendered |
+| the app hosting a session | libproc (`proc_listpids` + `proc_pidinfo`/`proc_pidpath` over ctypes), the parent chain walked in memory — ~4 ms for a thousand processes and no fork. `ps` is the fallback where there is no libproc; it is setuid root, and a process Claude Code spawns may not exec one, which used to leave the table empty and the button unrendered. The ppid comes from the *short* info: the privileged half refuses `login`, which sits between a shell and its terminal, and the chain broke there |
 
 Transcripts are read incrementally (the offset is remembered), so a refresh costs the same
 whether the file is small or several megabytes.

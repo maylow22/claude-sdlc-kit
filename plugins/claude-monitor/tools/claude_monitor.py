@@ -20,11 +20,14 @@ Run:  python3 claude_monitor.py [--port 8787] [--open]
 from __future__ import annotations
 
 import argparse
+import ctypes
+import ctypes.util
 import glob
 import json
 import os
 import re
 import socket
+import struct
 import subprocess
 import threading
 import time
@@ -481,8 +484,85 @@ APP_RE = re.compile(r"/([^/]+)\.app/Contents/MacOS/")
 MAX_ANCESTRY = 12
 
 
-def proc_table() -> dict[int, tuple[int, str, str]]:
-    """pid -> (ppid, tty, command) for every process; one ps call per tick."""
+# `ps` is setuid root, and a process that may not exec one - a sandboxed shell, a hardened
+# setup - used to take the focus button down with it: no process table, no parent chain, no
+# app, and the button simply never rendered. libproc answers the same two questions (who is
+# the parent, which tty) for this user's processes, wants no privileges, and forks nothing.
+PROC_ALL_PIDS = 1
+PROC_PIDTBSDINFO = 3  # struct proc_bsdinfo, 136 bytes: e_tdev at 108. Privileged: it
+PIDTBSDINFO_SIZE = 136  # answers for our own processes and refuses everyone else's
+PROC_PIDT_SHORTBSDINFO = 13  # struct proc_bsdshortinfo, 64 bytes: ppid at 4. The
+SHORTBSDINFO_SIZE = 64  # unprivileged half, and `login` between a shell and its
+PROC_PATH_MAX = 4096  # terminal is root's - the chain breaks there without it
+S_IFCHR = 0o020000
+_libproc: tuple | None | bool = None
+
+
+def libproc() -> tuple | None:
+    """(libproc, libc) on macOS, None anywhere else - loaded once, then remembered."""
+    global _libproc
+    if _libproc is None:
+        _libproc = False
+        try:
+            lp = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+            libc = ctypes.CDLL(ctypes.util.find_library("c") or "libc.dylib")
+            lp.proc_listpids.argtypes = [ctypes.c_uint32, ctypes.c_uint32,
+                                         ctypes.c_void_p, ctypes.c_int]
+            lp.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64,
+                                        ctypes.c_void_p, ctypes.c_int]
+            lp.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+            libc.devname.argtypes = [ctypes.c_int32, ctypes.c_uint16]
+            libc.devname.restype = ctypes.c_char_p
+            _libproc = (lp, libc)
+        except (OSError, AttributeError):
+            pass
+    return _libproc or None
+
+
+def _table_libproc() -> dict[int, tuple[int, str, str]]:
+    libs = libproc()
+    if not libs:
+        return {}
+    lp, libc = libs
+    size = lp.proc_listpids(PROC_ALL_PIDS, 0, None, 0)
+    if size <= 0:
+        return {}
+    pids = (ctypes.c_int32 * (size // 4 + 64))()
+    got = lp.proc_listpids(PROC_ALL_PIDS, 0, pids, ctypes.sizeof(pids))
+    info = ctypes.create_string_buffer(SHORTBSDINFO_SIZE)
+    path = ctypes.create_string_buffer(PROC_PATH_MAX)
+    out: dict[int, tuple[int, str, str]] = {}
+    for pid in pids[: max(got, 0) // 4]:
+        if pid <= 0:
+            continue
+        n = lp.proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, info, SHORTBSDINFO_SIZE)
+        if n <= 0:
+            continue  # gone between the listing and the question
+        ppid = struct.unpack_from("I", info.raw, 4)[0]
+        cmd = ""
+        if lp.proc_pidpath(pid, path, PROC_PATH_MAX) > 0:
+            cmd = path.value.decode("utf-8", "replace")
+        # the tty is not in this half and is wanted for one pid in a few hundred, so it
+        # is asked for where it is used rather than here
+        out[pid] = (ppid, "", cmd)
+    return out
+
+
+def proc_tty(pid: int) -> str:
+    """`ttys013` of one of our own processes, "" where there is none or it is refused."""
+    libs = libproc()
+    if not libs:
+        return ""
+    lp, libc = libs
+    info = ctypes.create_string_buffer(PIDTBSDINFO_SIZE)
+    if lp.proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, info, PIDTBSDINFO_SIZE) <= 0:
+        return ""
+    tdev = struct.unpack_from("i", info.raw, 108)[0]
+    dev = libc.devname(tdev, S_IFCHR) if tdev != -1 else None
+    return dev.decode() if dev else ""
+
+
+def _table_ps() -> dict[int, tuple[int, str, str]]:
     try:
         r = subprocess.run(
             ["ps", "-Ao", "pid=,ppid=,tty=,command="],
@@ -504,13 +584,20 @@ def proc_table() -> dict[int, tuple[int, str, str]]:
     return out
 
 
+def proc_table() -> dict[int, tuple[int, str, str]]:
+    """pid -> (ppid, tty, command) for every process. libproc where there is one, `ps`
+    everywhere else - the entries are the same either way, a path rather than a whole
+    command line in `command`, which is all APP_RE ever looks at."""
+    return _table_libproc() or _table_ps()
+
+
 def host(pid: int | None, procs: dict) -> dict | None:
     """Which terminal window is this session sitting in? Walk the parent chain
     (claude -> zsh -> pty-host -> Cursor.app) until an .app turns up. Under tmux or
     over ssh nothing owns the session any more and there is nothing to focus."""
     if not pid:
         return None
-    tty = (procs.get(pid) or (0, "", ""))[1]
+    tty = (procs.get(pid) or (0, "", ""))[1] or proc_tty(pid)
     seen = 0
     while pid > 1 and seen < MAX_ANCESTRY:
         e = procs.get(pid)
@@ -534,9 +621,27 @@ def _q(s: str) -> str:
 EDITORS = {"Cursor", "Code", "VSCodium", "Windsurf", "Zed", "Positron"}
 
 
-def tab_script(app: str, dev: str) -> str | None:
-    """Terminal and iTerm publish the tty of every tab, so the exact tab can be
-    raised - the only two apps where focus is precise rather than approximate."""
+def tab_script(app: str, dev: str, cwd: str) -> str | None:
+    """The script that lands on the exact tab, where the app gives a way to find it.
+    Terminal and iTerm publish the tty of every tab, which is exact. Ghostty (1.3+,
+    where its AppleScript dictionary starts) publishes the working directory instead,
+    which is not: sessions sharing a directory land on whichever tab comes first. It
+    is still the difference between the right tab and whatever was last on top."""
+    if app == "Ghostty" and cwd:
+        # `working directory` has been seen both as a path and as the file:// URL of
+        # OSC 7, with and without a trailing slash - hence the ends-with rather than an
+        # equality, which also keeps a parent directory from matching
+        return f'''tell application "Ghostty"
+  activate
+  repeat with t in terminals
+    set d to working directory of t
+    if d ends with {_q(cwd)} or d ends with {_q(cwd + "/")} then
+      focus t
+      return "tab"
+    end if
+  end repeat
+end tell
+return "app"'''
     if app == "Terminal":
         return f'''tell application "Terminal"
   activate
@@ -588,22 +693,35 @@ def focus(pid: int, cwd: str) -> dict:
     if not h:
         return {"ok": False, "error": "no terminal app owns this session"}
     app = h["app"]
-    script = tab_script(app, f"/dev/{h['tty']}") if h["tty"] else None
+    # The only value from the request that reaches a path or a script literal. No shell
+    # is involved and `_q` escapes the literal, but `open` reads an argument starting
+    # with a dash as a switch - so it is matched against the directories the server
+    # itself listed as sessions before any of that.
+    if cwd and cwd not in {s.get("cwd", "") for s in registry()}:
+        return {"ok": False, "error": "unknown session directory"}
+    script = tab_script(app, f"/dev/{h['tty']}" if h["tty"] else "", cwd)
     if script:
         ok, out = _run(["osascript", "-e", script])
         scope = out or "app"
+        if not ok:
+            # an app too old for the dictionary, AppleScript switched off, a tab closed
+            # mid-script: the window is still worth raising
+            ok, out = _run(["osascript", "-e", f"tell application {_q(app)} to activate"])
+            scope = "app"
     elif app in EDITORS and cwd:
-        # The only value from the request that ends up used as a path. No shell is
-        # involved, but `open` reads an argument starting with a dash as a switch, so
-        # it is matched against the directories the server itself listed as sessions.
-        if cwd not in {s.get("cwd", "") for s in registry()}:
-            return {"ok": False, "error": "unknown session directory"}
         ok, out = _run(["open", "-a", app, cwd])
         scope = "window"
     else:
         ok, out = _run(["osascript", "-e", f"tell application {_q(app)} to activate"])
         scope = "app"
-    return {"ok": True, "app": app, "scope": scope} if ok else {"ok": False, "error": out}
+    if ok:
+        return {"ok": True, "app": app, "scope": scope}
+    # -600 is not "the app is closed", it is "this process may not talk to it": a server
+    # Claude Code spawned has no Apple Event layer at all, and the same click works the
+    # moment the dashboard is started from a terminal of your own.
+    if "-600" in out:
+        out = f"no access to {app} - start the dashboard outside Claude Code"
+    return {"ok": False, "error": out}
 
 
 def agents_json() -> list[dict]:
