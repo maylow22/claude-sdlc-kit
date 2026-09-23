@@ -988,7 +988,8 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
       text-transform:uppercase;letter-spacing:.05em;font-weight:600}
 .det-only{display:none}
 .card.det .det-only{display:revert}
-.i{flex:none;border:none;background:none;padding:0;line-height:1;font-size:14px;
+.foot{display:flex;justify-content:flex-end;margin-top:4px;margin-bottom:-4px}
+.i{border:none;background:none;padding:0;line-height:1;font-size:14px;
    color:var(--dim);cursor:pointer;opacity:.7}
 .i:hover,.card.det .i{color:var(--busy);opacity:1}
 .card.att .i{color:var(--att-ink)}
@@ -1266,10 +1267,7 @@ function card(s, now){
       ${s.pr ? `<a class="pill pr" href="${esc(s.pr.url)}" target="_blank" rel="noreferrer"
         title="${esc(s.pr.url)}">PR #${esc(String(s.pr.number))}</a>` : ""}
       <span class="pill ${st}">${st === "busy" ? '<i class="spin"></i>' : ""}${
-        a ? "needs you" : st}</span>
-      <button class="i" data-det="${esc(s.sessionId)}"
-        title="kind, pid, turns, when it was last active and the token breakdown"
-        >&#9432;</button></div>
+        a ? "needs you" : st}</span></div>
     <div class="repo">${s.repoUrl
       ? `<a href="${esc(s.repoUrl)}" target="_blank" rel="noreferrer"
           title="${esc(s.repoUrl)}">${esc(s.repo)}</a>` : esc(s.repo)}</div>
@@ -1289,6 +1287,9 @@ function card(s, now){
       <div class="det-only">thinking <b>${n(t.thinking)}</b></div>
     </div>
     ${subs ? `<div class="subs">${subs}</div>` : ""}
+    <div class="foot"><button class="i" data-det="${esc(s.sessionId)}"
+      title="kind, pid, turns, when it was last active and the token breakdown"
+      >&#9432;</button></div>
   </div>`;
 }
 
