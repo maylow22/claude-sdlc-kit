@@ -2,16 +2,17 @@
 """Live dashboard of every Claude Code session running on this machine.
 
 Data sources:
-  - `claude agents --json`           -> sessions, pid/cwd/kind/status/waitingFor
+  - ~/.claude/sessions/<pid>.json    -> sessions, pid/cwd/kind/status (liveness: the
+                                       session's unix socket accepts a connection)
+  - `claude agents --json`           -> waitingFor, for this server's own session
   - ~/.claude/projects/*/<sid>.jsonl -> tokens, model, effort, git branch, activity
   - .../<sid>/subagents/agent-*      -> subagent tree (agentType, spawnDepth, tokens)
   - ~/.claude/monitor/notify/*.json  -> Notification hook: session is waiting on the user
 
 Nothing is registered at start-up and no state is kept between requests: every /api/state
 re-reads all of the above, so a session older than the server appears on the next poll
-like any other. What does go stale is a long-lived process - `claude agents --json` has
-been seen answering an orphaned server with a session list hours out of date - which is
-why SessionStart restarts the dashboard rather than leaving one instance running for days.
+like any other. That the session list is read from the registry rather than taken from
+`claude agents --json` is what makes this true at all - see registry().
 
 Run:  python3 claude_monitor.py [--port 8787] [--open]
 """
@@ -23,6 +24,7 @@ import glob
 import json
 import os
 import re
+import socket
 import subprocess
 import threading
 import time
@@ -31,6 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 PROJECTS = Path.home() / ".claude" / "projects"
+SESSIONS = Path.home() / ".claude" / "sessions"
 CONFIG = Path.home() / ".claude.json"
 NOTIFY = Path.home() / ".claude" / "monitor" / "notify"
 SUBAGENT_ACTIVE_SEC = 60
@@ -465,7 +468,7 @@ def focus(pid: int, cwd: str) -> dict:
         # The only value from the request that ends up used as a path. No shell is
         # involved, but `open` reads an argument starting with a dash as a switch, so
         # it is matched against the directories the server itself listed as sessions.
-        if cwd not in {s.get("cwd", "") for s in agents_json()}:
+        if cwd not in {s.get("cwd", "") for s in registry()}:
             return {"ok": False, "error": "unknown session directory"}
         ok, out = _run(["open", "-a", app, cwd])
         scope = "window"
@@ -476,6 +479,8 @@ def focus(pid: int, cwd: str) -> dict:
 
 
 def agents_json() -> list[dict]:
+    """`claude agents --json`, which answers for the caller's own session only - see
+    registry(). Kept for `waitingFor`, which the registry files do not carry."""
     try:
         raw = subprocess.run(
             ["claude", "agents", "--json"], capture_output=True, text=True, timeout=20
@@ -485,12 +490,78 @@ def agents_json() -> list[dict]:
         return []
 
 
+SOCKET_TIMEOUT = 0.25
+
+
+def alive(path: str) -> bool:
+    """Is a session still behind its messaging socket? A live one listens; a session that
+    died leaves the socket file behind and it refuses the connection. Nothing about the
+    process is asked, which is the point - see registry()."""
+    if not path or not os.path.exists(path):
+        return False
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(SOCKET_TIMEOUT)
+    try:
+        s.connect(path)
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def registry() -> list[dict]:
+    """Every session on the machine, read from ~/.claude/sessions/<pid>.json.
+
+    `claude agents --json` is the obvious source and used to be the only one, but it
+    answers with the caller's own session and nothing else: Claude Code confines a session
+    to its own process tree, so the liveness check behind that listing comes back EPERM
+    for every *other* session - live or not - and they are all pruned away. A dashboard
+    started by a SessionStart hook therefore showed exactly one card, its own, while half
+    a dozen sessions were running.
+
+    The registry files are readable and the sockets accept a connection from inside that
+    confinement, so this reads the one and tests the other. `waitingFor` is the single
+    field the files do not carry; build_state() overlays it from the CLI where it can.
+    """
+    out = []
+    for f in SESSIONS.glob("*.json"):
+        try:
+            s = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if s.get("sessionId") and alive(s.get("messagingSocketPath") or ""):
+            out.append(s)
+    # one pid, one session: a recycled pid can leave two files behind, and the fresher
+    # record is the one that still means something
+    best: dict[int, dict] = {}
+    for s in out:
+        cur = best.get(s.get("pid"))
+        if not cur or s.get("updatedAt", 0) > cur.get("updatedAt", 0):
+            best[s.get("pid")] = s
+    return list(best.values())
+
+
+IDLE_STATUS = {"idle", "waiting", None}
+
+
+def working(status: str | None) -> bool:
+    """The status vocabulary is open-ended - `busy`, `idle`, `waiting` and `shell` have all
+    turned up - so a session is working unless it is plainly not, and a status nobody here
+    has seen yet still lands on the right side of the sort and of the count."""
+    return status not in IDLE_STATUS
+
+
 def build_state() -> dict:
     sessions = []
     branches: dict[str, str | None] = {}
     procs = proc_table()
-    for s in agents_json():
+    # `waitingFor` only ever arrives for the session the server itself runs in, so it is
+    # an overlay on the registry rather than the list itself
+    waiting = {a.get("sessionId"): a for a in agents_json()}
+    for s in registry():
         sid = s.get("sessionId", "")
+        s = {**s, **{k: v for k, v in waiting.get(sid, {}).items() if v is not None}}
         path = transcript(sid)
         t = scan(path) if path else _fresh()
         limit = CONTEXT_LIMITS.get(t["model"] or "", DEFAULT_LIMIT)
@@ -530,11 +601,11 @@ def build_state() -> dict:
             }
         )
 
-    sessions.sort(key=lambda s: (not s["attention"], s["status"] != "busy", -s["mtime"]))
+    sessions.sort(key=lambda s: (not s["attention"], not working(s["status"]), -s["mtime"]))
     totals = {
         "sessions": len(sessions),
         "waiting": sum(1 for s in sessions if s["attention"]),
-        "busy": sum(1 for s in sessions if s["status"] == "busy"),
+        "busy": sum(1 for s in sessions if working(s["status"])),
         "subagents": sum(len(s["subagents"]) for s in sessions),
         "output": sum(s["tokens"]["output"] for s in sessions),
         "input": sum(s["tokens"]["input"] for s in sessions),
@@ -659,7 +730,7 @@ def live_tickets(open_: dict, branch: str | None) -> list[str]:
 def build_backlog() -> dict:
     """Only projects that some open session is sitting in - the monitor knows nothing
     about a repository nobody has a session in, and does not go looking for one."""
-    sessions = agents_json()
+    sessions = registry()
     cache: dict[str, str | None] = {}
     groups: dict[str, list[dict]] = {}
     for s in sessions:

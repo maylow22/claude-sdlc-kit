@@ -23,7 +23,7 @@ The reason comes from two sources:
 
 | Source | What it knows | When |
 |---|---|---|
-| `claude agents --json` → `status: waiting` | that the session is waiting (`waitingFor`) | always, even without the plugin |
+| the session's `status` in the registry, and `waitingFor` from `claude agents --json` | that the session is waiting | always, even without the plugin |
 | `Notification` hook | **why** — a tool permission (and which tool), an MCP dialog, 60 s idle | after restarting the session with the plugin |
 
 The hook writes `~/.claude/monitor/notify/<sessionId>.json`; the dashboard treats it as valid
@@ -115,10 +115,13 @@ than its own pid.
 
 ### Stopping an instance another session started
 
-The restart is what keeps the dashboard honest: an instance left running for days has been seen
-answering with a session list hours out of date — `claude agents --json` goes stale in a
-long-lived orphan, reporting a session that died in the night and missing the one typing at you
-now. Getting the old process to go is the hard part, and a signal does not do it.
+The restart is what puts a new session's code in front of everybody watching, and it used to
+matter a great deal more: while the session list still came from `claude agents --json`, an
+instance left behind by a session that had ended went on answering for *that* session — one was
+found reporting a session dead since the night before and missing the one typing at it. Reading
+the registry instead (below) took that failure away; the restart now buys current code, not
+correctness. Getting the old process to go is the hard part either way, and a signal does not
+do it.
 
 Claude Code confines a session to its **own process tree**. A monitor started by session A
 cannot be killed by session B — `kill` answers `Operation not permitted` though both run as the
@@ -156,6 +159,30 @@ You stop it by hand with `tools/restart.sh --status` first and then either
 `curl -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8787/api/quit`, or
 `kill $(lsof -ti:8787)` **from your own terminal** — which, unlike a session, is not confined to
 somebody else's tree. It will not stop on its own; the next session start brings it back.
+
+## Seeing every session, not just this one
+
+The dashboard listed exactly one session — the one whose `SessionStart` hook had started it —
+while half a dozen others were running. It is the same confinement that breaks the restart:
+Claude Code holds a session inside its **own process tree**, and the liveness check behind
+`claude agents --json` is a check on a process. From inside a session, `kill(pid, 0)` against
+every *other* session answers `EPERM` whether that session is alive or not, so the listing
+prunes them all and hands back the caller's own and nothing else.
+
+Two things do reach across that boundary, and the session list is built out of them instead:
+
+| What | Where |
+|---|---|
+| the sessions | `~/.claude/sessions/<pid>.json` — pid, `sessionId`, `cwd`, `kind`, `name`, `status` |
+| whether one is still alive | a connection to its `messagingSocketPath` — a live session listens, a session that died leaves a socket file behind and it refuses |
+
+Neither asks anything about a process, which is the whole point. `claude agents --json` is still
+called, for the one field the registry files do not carry — `waitingFor` — and it is an overlay
+on the list, not the list.
+
+The status vocabulary is open-ended: `busy`, `idle`, `waiting` and `shell` have all turned up. A
+session therefore counts as **working unless it is plainly not**, so a status nobody has seen
+yet still lands on the right side of the sort and of the KPI count.
 
 ## What it shows
 
@@ -264,7 +291,8 @@ not run the dashboard (`CLAUDE_MONITOR_AUTOSTART=0`).
 
 | What | From where |
 |---|---|
-| session list, status, `waitingFor` | `claude agents --json` |
+| session list, status, `cwd`, `kind`, name | `~/.claude/sessions/<pid>.json` (liveness: a connection to the session's unix socket) |
+| `waitingFor` | `claude agents --json` — answers for this server's own session only, so it is an overlay |
 | tokens, model, effort | `~/.claude/projects/<slug>/<sessionId>.jsonl` → `.message.usage` |
 | subagent tree | `<sessionId>/subagents/agent-*.meta.json` |
 | git branch | `git -C <cwd> branch --show-current` (live — the transcript's copy tends to be stale) |
@@ -297,6 +325,9 @@ whether the file is small or several megabytes.
 - The spinner marking a ticket as taken up needs the ticket to **carry its branch in a field**.
   `/feature:start` writes that line when it creates the branch; a ticket started by hand, or one
   filed before that was the habit, stays unmarked — the board just does not know.
+- `claude agents --json` answers with **the caller's own session and no other**, however many
+  are running — its liveness check is a process check, and those are refused across the tree
+  boundary. Anything reading it for a machine-wide picture gets one row.
 - A session may not signal, or even see, a process outside its **own tree**: `ps` comes back
   `operation not permitted` and `kill` `Operation not permitted`, same user or not. That is why
   the restart goes over HTTP — and why the `↗ <app>` button quietly disappears where the process
