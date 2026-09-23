@@ -193,7 +193,8 @@ yet still lands on the right side of the sort and of the KPI count.
 - **which session this is** — the card is headed by the **session's own name** (`hx-anon`,
   `claude-sdlc-kit-c3`), because that is what tells two sessions in one repository apart. Under
   it the checkout, a line each: the repository, the branch, and — only for a linked worktree —
-  `wt:<worktree>`. The repository is the one the worktree belongs to, not the directory name
+  `wt:<worktree>`. The repository is the one the worktree belongs to, not the directory name,
+  and it is a **link to `origin`** where that remote is on GitHub or Bitbucket
 - **status** — needs you / busy / idle, pid, kind (interactive/background), model
 - **tokens** — output, input, cache read/write, thinking; context window occupancy
 - **folded away** — subagents, turns, input tokens, thinking, cache read/write, plan tier.
@@ -301,6 +302,7 @@ not run the dashboard (`CLAUDE_MONITOR_AUTOSTART=0`).
 | subagent tree | `<sessionId>/subagents/agent-*.meta.json` |
 | git branch | `git -C <cwd> branch --show-current` (live — the transcript's copy tends to be stale) |
 | repository + worktree | `git -C <cwd> rev-parse --show-toplevel --git-common-dir` — the common git dir is what a linked worktree shares with its repository |
+| the link on the repository | `git -C <cwd> config --get remote.origin.url` → `https://<host>/<owner>/<repo>`, composed rather than passed through, and only for `github.com` and `bitbucket.org`; any other host stays plain text |
 | plan usage tiles | `~/.claude.json` → `cachedUsageUtilization` (the cache `/usage` fills) |
 | restart + URL into the session | `hooks/session-start.sh` → `tools/restart.sh` (SessionStart hook) |
 | the reason for waiting on the user | `hooks/notification.py` → `~/.claude/monitor/notify/<sessionId>.json` |
