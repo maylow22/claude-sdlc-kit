@@ -91,9 +91,13 @@ How precisely it lands depends on the app:
 **If the button does nothing**, the dashboard is running where macOS gives it no Apple Event
 layer: a process Claude Code spawns — the SessionStart hook, `/claude-monitor:start` — is
 confined, and every `tell application` from it comes back `-600 Application isn't running`,
-System Events included. The button says so rather than showing the raw error. Start it from a
-terminal of your own instead (`tools/restart.sh`) and the same click works; the hook keeps the
-instance alive from then on.
+System Events included. The button says so rather than showing the raw error.
+
+Started from a terminal of your own (`tools/restart.sh`) the same click works — but only until
+the next Claude Code session starts, because the SessionStart hook **replaces** whatever is on
+the port with an instance of its own, confined again. Until that is settled, a dashboard you
+want to click through has to be the newest thing on the port: start it by hand after the
+sessions, or set `CLAUDE_MONITOR_AUTOSTART=0` so the hook leaves the port alone.
 
 No Accessibility grant is needed anywhere (which is why `open -a` beats System Events for the
 editors). Under `tmux` or over ssh no app owns the session any more — there the button is not
