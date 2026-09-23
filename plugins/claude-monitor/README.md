@@ -195,8 +195,12 @@ yet still lands on the right side of the sort and of the KPI count.
   it the checkout, a line each: the repository, the branch, and — only for a linked worktree —
   `wt:<worktree>`. The repository is the one the worktree belongs to, not the directory name,
   and it is a **link to `origin`** where that remote is on GitHub or Bitbucket
-- **status** — needs you / busy / idle, pid, kind (interactive/background), model
-- **tokens** — output, input, cache read/write, thinking; context window occupancy
+- **status** — needs you / busy / idle, and the model the session runs on
+- **tokens** — how full the context window is, as a bar and as `used / limit`
+- **the ⓘ on the card** — everything the headline leaves out, folded away until you tap it:
+  kind (interactive/background), pid, turns, how long ago the session was last active, and
+  the token breakdown (output, input, cache read/write, thinking). It is per card, and the
+  card keeps it open across the repaint every refresh does
 - **folded away** — subagents, turns, input tokens, thinking, cache read/write, plan tier.
   Always visible instead: sessions, busy, need you, context total, output tokens and **cache
   hit** (the share of the input side served from the cache — what keeps a long session cheap)

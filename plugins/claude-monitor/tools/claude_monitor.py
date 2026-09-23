@@ -930,6 +930,12 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .card.att .go{border-color:var(--att);color:var(--att-ink)}
 .pill{font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid currentColor;
       text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.det-only{display:none}
+.card.det .det-only{display:revert}
+.i{flex:none;border:none;background:none;padding:0;line-height:1;font-size:14px;
+   color:var(--dim);cursor:pointer;opacity:.7}
+.i:hover,.card.det .i{color:var(--busy);opacity:1}
+.card.att .i{color:var(--att-ink)}
 .pill.busy{color:var(--busy)}.pill.idle{color:var(--idle)}
 .spin{display:inline-block;vertical-align:-1px;width:8px;height:8px;margin-right:5px;
       border:1.5px solid currentColor;border-top-color:transparent;border-radius:99px;
@@ -956,7 +962,8 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .meta{color:var(--dim);font-size:12px;margin-bottom:9px}
 .bar{height:5px;background:var(--bar2);border-radius:99px;overflow:hidden;margin:3px 0 5px}
 .bar>i{display:block;height:100%;background:var(--bar)}
-.toks{display:grid;grid-template-columns:1fr 1fr;gap:1px 12px;font-size:12px;color:var(--dim)}
+.toks{display:grid;grid-template-columns:1fr;gap:1px 12px;font-size:12px;color:var(--dim)}
+.card.det .toks{grid-template-columns:1fr 1fr}
 .toks b{color:var(--fg);font-weight:550;font-variant-numeric:tabular-nums;float:right}
 .subs{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
 .subs>div{display:flex;gap:7px;align-items:baseline;font-size:12px;padding:2px 0}
@@ -1137,9 +1144,18 @@ function planKpis(u, now){
 
 // same reason as the KPI fold: the cards are rebuilt every tick
 const expanded = new Set();  // sessions whose last agent message is unfolded
+const details = new Set();   // sessions whose card shows more than the headline
 document.getElementById("grid").addEventListener("click", ev => {
   const go = ev.target.closest(".go");
   if(go){ focusSession(go); return; }
+  const inf = ev.target.closest("[data-det]");
+  if(inf){
+    const sid = inf.dataset.det;
+    details.has(sid) ? details.delete(sid) : details.add(sid);
+    // the class right away, the set for the repaint a tick later
+    inf.closest(".card").classList.toggle("det");
+    return;
+  }
   const el = ev.target.closest(".say");
   if(!el) return;
   const sid = el.dataset.sid;
@@ -1183,30 +1199,33 @@ function card(s, now){
       ${said ? `<div class="say${expanded.has(s.sessionId) ? " open" : ""}"
         data-sid="${esc(s.sessionId)}" title="click to expand">${esc(said.text)}</div>` : ""
       }</div>` : "";
-  return `<div class="card ${st}">
+  return `<div class="card ${st}${details.has(s.sessionId) ? " det" : ""}">
     <div class="head"><h2>${esc(s.name)}</h2>
       ${s.host ? `<button class="go" data-pid="${s.pid}" data-cwd="${esc(s.cwd)}"
         title="bring the ${esc(s.host)} window running this session to the front"
         >&#8599; ${esc(s.host)}</button>` : ""}
       <span class="pill ${st}">${st === "busy" ? '<i class="spin"></i>' : ""}${
-        a ? "needs you" : st}</span></div>
+        a ? "needs you" : st}</span>
+      <button class="i" data-det="${esc(s.sessionId)}"
+        title="kind, pid, turns, when it was last active and the token breakdown"
+        >&#9432;</button></div>
     <div class="repo">${s.repoUrl
       ? `<a href="${esc(s.repoUrl)}" target="_blank" rel="noreferrer"
           title="${esc(s.repoUrl)}">${esc(s.repo)}</a>` : esc(s.repo)}</div>
     ${s.branch ? `<div class="branch">${esc(s.branch)}</div>` : ""}
     ${s.worktree ? `<div class="wt">wt:${esc(s.worktree)}</div>` : ""}
-    <div class="meta">${esc(s.kind)}
-      · pid ${s.pid} · ${esc(s.model||"?")}${s.effort?" / "+esc(s.effort):""}
-      <br>${s.turns} turns · active ${ago(s.mtime, now)} ago</div>
+    <div class="meta">${esc(s.model||"?")}${s.effort?" / "+esc(s.effort):""}
+      <span class="det-only"> &middot; ${esc(s.kind)} &middot; pid ${s.pid}
+      <br>${s.turns} turns &middot; active ${ago(s.mtime, now)} ago</span></div>
     ${att}
     <div class="bar"><i style="width:${pct}%"></i></div>
     <div class="toks">
       <div>context <b>${n(s.context)} / ${n(s.contextLimit)}</b></div>
-      <div>output <b>${n(t.output)}</b></div>
-      <div>cache read <b>${n(t.cache_read)}</b></div>
-      <div>cache write <b>${n(t.cache_write)}</b></div>
-      <div>input <b>${n(t.input)}</b></div>
-      <div>thinking <b>${n(t.thinking)}</b></div>
+      <div class="det-only">output <b>${n(t.output)}</b></div>
+      <div class="det-only">cache read <b>${n(t.cache_read)}</b></div>
+      <div class="det-only">cache write <b>${n(t.cache_write)}</b></div>
+      <div class="det-only">input <b>${n(t.input)}</b></div>
+      <div class="det-only">thinking <b>${n(t.thinking)}</b></div>
     </div>
     ${subs ? `<div class="subs">${subs}</div>` : ""}
   </div>`;
