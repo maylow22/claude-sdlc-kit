@@ -1880,9 +1880,12 @@ function paintStats(){
     + (pick ? ` · the rest of the bar is every other project` : ``)
     + (pick ? ` · <a href="#" onclick="stSet('pick',${arg(stPick)});return false">clear</a>` : ` · pick a project below to single it out`)
     + `</div><div id="ch"></div>`
-    + (pick ? `<div class="lg"><span><i style="background:var(--bar)"></i>`
-        + `${esc(pick.p.name)}</span><span><i style="${REST_SWATCH}"></i>`
-        + `other projects</span></div>` : ``)
+    // the legend is there whether or not a project is picked - it names what the accent
+    // means either way, and a line that comes and goes shoves the whole table up and down
+    + `<div class="lg"><span><i style="background:var(--bar)"></i>`
+    + `${pick ? esc(pick.p.name) : "all projects"}</span>`
+    + (pick ? `<span><i style="${REST_SWATCH}"></i>other projects</span>` : ``)
+    + `</div>`
     + `</div>`
     + `<div class="pane"><h3>Projects</h3>`
     + `<div class="cap">${esc(unit)} in this range · click a row to single it out</div>`
