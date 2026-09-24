@@ -679,7 +679,10 @@ def registry() -> list[dict]:
     return list(best.values())
 
 
-IDLE_STATUS = {"idle", "waiting", None}
+# `shell` is the user in the session's shell mode, not the agent computing - and the
+# session stays on it until something else happens, so counting it as work leaves a
+# spinner on a card that has been sitting at the prompt for hours.
+IDLE_STATUS = {"idle", "waiting", "shell", None}
 
 
 def working(status: str | None) -> bool:
@@ -695,12 +698,17 @@ def build_state() -> dict:
     repos: dict[str, tuple[str, str | None, str | None]] = {}
     roots: dict[str, str | None] = {}  # cwd -> the backlog's repository root, if any
     procs = proc_table()
-    # `waitingFor` only ever arrives for the session the server itself runs in, so it is
-    # an overlay on the registry rather than the list itself
+    # `waitingFor` is the one field the registry files do not carry, so the CLI listing is
+    # an overlay for that field and for nothing else. It used to be merged whole, which
+    # silently handed the CLI the `status` too - and the CLI reports a coarser vocabulary
+    # than the files do (a session sitting in `shell` comes back as `busy`), so a session
+    # nobody was working in spun the busy spinner for as long as it stayed open.
     waiting = {a.get("sessionId"): a for a in agents_json()}
     for s in registry():
         sid = s.get("sessionId", "")
-        s = {**s, **{k: v for k, v in waiting.get(sid, {}).items() if v is not None}}
+        wf = (waiting.get(sid) or {}).get("waitingFor")
+        if wf is not None:
+            s = {**s, "waitingFor": wf}
         path = transcript(sid)
         t = scan(path) if path else _fresh()
         limit = CONTEXT_LIMITS.get(t["model"] or "", DEFAULT_LIMIT)
