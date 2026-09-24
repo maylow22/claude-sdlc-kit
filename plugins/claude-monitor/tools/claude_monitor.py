@@ -1266,6 +1266,14 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
    is a picture of. A row of the table is the filter for the chart above it. --- */
 .st-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
 .st-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--dim)}
+/* the one control in the row that does something rather than filters something, so it sits
+   apart from the two segmented pickers */
+.rf{background:none;border:1px solid var(--line);border-radius:7px;color:var(--dim);
+    font:inherit;font-size:12px;padding:3px 10px;cursor:pointer;margin-left:auto;
+    display:inline-flex;align-items:center;gap:6px}
+.rf:hover{border-color:var(--dim);color:var(--fg)}
+.rf:disabled{cursor:default;opacity:.6}
+.rf b{font-weight:inherit;font-size:13px;line-height:1}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
 .seg button{background:none;border:none;border-right:1px solid var(--line);color:var(--dim);
             font:inherit;font-size:12px;padding:3px 10px;cursor:pointer}
@@ -1870,6 +1878,8 @@ function paintStats(){
     + `<span class="st-lbl">range</span>${seg("range", RANGES, stRange)}`
     + `<span class="st-lbl">count</span>`
     + seg("metric", [["total", "all tokens"], ["output", "output only"]], stMetric)
+    + `<button class="rf" onclick="refreshStats(this)" title="read the archive again now">`
+    + `<b>\u21bb</b>refresh</button>`
     + `</div>`
     + `<div class="kpis">`
     + kpi(n(stTotal(sum)), "tokens total") + kpi(n(sum[1]), "output tokens")
@@ -1890,8 +1900,7 @@ function paintStats(){
     + (pick ? `<span><i style="${REST_SWATCH}"></i>other projects</span>` : ``)
     + `</div>`
     + `</div>`
-    + `<div class="pane"><h3>Projects</h3>`
-    + `<div class="cap">${esc(unit)} in this range · click a row to single it out</div>`
+    + `<div class="pane">`
     + `<div class="pt-wrap"><table class="pt"><thead><tr><th>project</th><th>trend</th><th>share</th>`
     + `<th>${esc(unit)}</th>`
     + (stMetric === "output" ? `` : `<th>output</th>`)  // the metric column already is it
@@ -1948,8 +1957,15 @@ addEventListener("mousemove", e => {
 // different question from the one the other two views ask their tick
 function stampStats(){
   document.getElementById("sub").innerHTML =
-    "archive read " + new Date(statsAt).toLocaleTimeString() + " \u00b7 re-read hourly \u00b7 "
-    + `<button class="iv" onclick="tickStats(true)">re-read now</button>`;
+    "archive read " + new Date(statsAt).toLocaleTimeString() + " \u00b7 re-read hourly";
+}
+
+// the row is rebuilt by the repaint that ends the read, so the button has no state to put
+// back - it only has to say it heard the click
+async function refreshStats(btn){
+  btn.disabled = true;
+  btn.innerHTML = `<i class="spin"></i>reading\u2026`;
+  await tickStats(true);
 }
 
 async function tickStats(force){
