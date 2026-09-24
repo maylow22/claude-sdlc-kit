@@ -1184,9 +1184,9 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
       text-transform:uppercase;letter-spacing:.05em;font-weight:600}
 .det-only{display:none}
 .card.det .det-only{display:revert}
-.foot{display:flex;justify-content:flex-end;margin-top:4px;margin-bottom:-4px}
 .i{border:none;background:none;padding:0;line-height:1;font-size:14px;
-   color:var(--dim);cursor:pointer;opacity:.7}
+   color:var(--dim);cursor:pointer;opacity:.7;flex:none;align-self:center;
+   margin-left:-2px;margin-right:-2px}
 .i:hover,.card.det .i{color:var(--busy);opacity:1}
 .card.att .i{color:var(--att-ink)}
 .pill.busy{color:var(--busy)}.pill.idle{color:var(--idle)}
@@ -1532,6 +1532,9 @@ function card(s, now){
       }</div>` : "";
   return `<div class="card ${st}${details.has(s.sessionId) ? " det" : ""}">
     <div class="head"><h2>${esc(s.name)}</h2>
+      <button class="i" data-det="${esc(s.sessionId)}"
+        title="kind, pid, turns, when it was last active and the token breakdown"
+        >&#9432;</button>
       ${s.host ? `<button class="go" data-pid="${s.pid}" data-cwd="${esc(s.cwd)}"
         title="bring the ${esc(s.host)} window running this session to the front"
         >&#8599; ${esc(s.host)}</button>` : ""}
@@ -1558,9 +1561,6 @@ function card(s, now){
       <div class="det-only">thinking <b>${n(t.thinking)}</b></div>
     </div>
     ${subs ? `<div class="subs">${subs}</div>` : ""}
-    <div class="foot"><button class="i" data-det="${esc(s.sessionId)}"
-      title="kind, pid, turns, when it was last active and the token breakdown"
-      >&#9432;</button></div>
   </div>`;
 }
 
