@@ -1695,7 +1695,31 @@ const RANGES = [[30, "30 days"], [90, "90 days"], [0, "all"]];
 // archive is read once an hour and the view sits still in between - no fetch, no repaint.
 // `re-read now` in the sub line is there for the moment you do want it sooner.
 const STATS_TTL = 36e5;
-let stats = null, statsAt = 0, stPainted = false;
+let stats = null, statsAt = 0, stPainted = false, stBusy = false;
+
+// The payload outlives a reload in localStorage, so opening the tab does not have to wait on
+// a read of the whole archive before it can show anything. It stays a cache and nothing more:
+// the hourly rule above decides whether what came out of it is still good enough, and the
+// stamp says when it was actually read, not when it was pulled out of storage.
+const STATS_MAX = 2e6;  // a quota error would take the theme and the chosen view down with it
+
+function stRestore(){
+  const c = load("stats", null);
+  // shape check, not paranoia - the payload's shape belongs to the version of the plugin
+  // that wrote it, and a browser keeps storage across an update
+  if(!c || !c.at || !c.data || !Array.isArray(c.data.projects)) return;
+  stats = c.data;
+  statsAt = c.at;
+}
+
+function stStore(){
+  try {
+    const raw = JSON.stringify({at: statsAt, data: stats});
+    if(raw.length < STATS_MAX) localStorage.setItem(LS + "stats", raw);
+  } catch (e) {}  // private windows, storage off, quota - none of it is worth a broken view
+}
+
+stRestore();
 let stRange = load("st-range", 90);
 let stMetric = load("st-metric", "total");  // everything sent and written, or the output alone
 let stPick = load("st-pick", null);         // repository root; null is every project at once
@@ -1972,8 +1996,15 @@ async function tickStats(force){
   const stale = force || !stats || Date.now() - statsAt > STATS_TTL;
   if(!stale && stPainted) return;  // nothing has happened that the page does not already show
   if(stale){
-    stats = await (await fetch("/api/stats")).json();
-    statsAt = Date.now();
+    // a cold read takes over a second and `statsAt` only moves when it lands, so without
+    // this the ticks that fall inside it would each start a read of their own
+    if(stBusy) return;
+    stBusy = true;
+    try {
+      stats = await (await fetch("/api/stats")).json();
+      statsAt = Date.now();
+      stStore();
+    } finally { stBusy = false; }
   }
   stPainted = true;
   stampStats();
