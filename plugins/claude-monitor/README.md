@@ -235,6 +235,12 @@ looking around the disk. The file is searched for upwards from the session's `cw
 outside the repository, because the backlog lives in the repository root and a session often
 sits deeper.
 
+Where no open project has one, **the tab is not shown at all** — a board with nothing on it is
+not worth a tab. `/api/state` counts the projects with a backlog on every poll, so the tab
+appears the moment one does and goes away when the last one closes, taking the view with it if
+that is where you were standing. The last answer is remembered, otherwise the tab would flicker
+in or out on every load while the first poll is in flight.
+
 Nothing in the parser is hardcoded to English: `##` is a priority, `###` a ticket, and a
 `**Foo:** bar` line is a field whatever `Foo` says — the backlog is written in the language of
 the repo, and headings and fields come out of the file as they are.

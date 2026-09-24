@@ -693,6 +693,7 @@ def build_state() -> dict:
     sessions = []
     branches: dict[str, str | None] = {}
     repos: dict[str, tuple[str, str | None, str | None]] = {}
+    roots: dict[str, str | None] = {}  # cwd -> the backlog's repository root, if any
     procs = proc_table()
     # `waitingFor` only ever arrives for the session the server itself runs in, so it is
     # an overlay on the registry rather than the list itself
@@ -708,6 +709,7 @@ def build_state() -> dict:
         except OSError:
             mtime = 0
         subs = subagents(path, sid) if path else []
+        backlog_root(s.get("cwd", ""), roots)  # for the tab count below; walks up, no reads
         branch = git_branch(s.get("cwd", ""), branches) or t["branch"]
         repo, worktree, repo_url = git_repo(s.get("cwd", ""), repos)
         pr = pull_request(s.get("cwd", ""), branch, repo_url)
@@ -757,6 +759,13 @@ def build_state() -> dict:
         "thinking": sum(s["tokens"]["thinking"] for s in sessions),
         "turns": sum(s["turns"] for s in sessions),
         "context": sum(s["context"] for s in sessions),
+        # how many open projects have a backlog at all - on a machine with none the board
+        # would be an empty page behind a tab, so the page leaves the tab out. The same
+        # test the board itself uses: a file that parses to nothing is not a backlog.
+        "backlogs": sum(
+            1 for r in {r for r in roots.values() if r}
+            if read_backlog(Path(r) / "BACKLOG.md")
+        ),
     }
     return {
         "now": time.time(),
@@ -2016,6 +2025,25 @@ async function tickStats(force){
 const VIEWS = ["sessions", "backlog", "stats"];
 let view = load("view", "sessions");
 if(!VIEWS.includes(view)) view = "sessions";
+
+// The board is only meaningful where an open project has a BACKLOG.md; on a machine with
+// none the tab opens an empty page, so it is not shown at all. The answer arrives with the
+// first poll, which is a tick away - so the last one is remembered, otherwise the tab would
+// flicker in or out on every load.
+let hasBacklog = load("has-backlog", true);
+if(view === "backlog" && !hasBacklog) view = "sessions";
+
+function paintBacklogTab(){
+  document.querySelector('.tab[data-v="backlog"]').hidden = !hasBacklog;
+}
+
+function setBacklogTab(on){
+  if(on === hasBacklog) return;
+  hasBacklog = on;
+  save("has-backlog", on);
+  paintBacklogTab();
+  if(!on && view === "backlog") setView("sessions");  // the board just went away under it
+}
 function setView(v){
   view = v;
   save("view", v);
@@ -2040,6 +2068,7 @@ function stamp(){
 
 async function tickBacklog(){
   const d = await (await fetch("/api/backlog")).json();
+  setBacklogTab(d.projects.length > 0);
   stamp();
   document.getElementById("backlog").innerHTML = board(d);
   document.title = (d.waiting ? `(${d.waiting}) ` : "") + "Claudemon";
@@ -2051,6 +2080,7 @@ async function tick(){
     if(view === "stats"){ await tickStats(); return; }
     const d = await (await fetch("/api/state")).json();
     const T = d.totals, now = d.now;
+    setBacklogTab(T.backlogs > 0);
     const U = d.usage;
     stamp();
     document.getElementById("kpis").innerHTML =
@@ -2077,6 +2107,7 @@ async function tick(){
   }
 }
 applyTheme();  // the early script set the palette, this puts the choice on the button
+paintBacklogTab();
 setView(view);  // the markup ships with sessions open; a restored view has to take over
 arm();
 </script>
