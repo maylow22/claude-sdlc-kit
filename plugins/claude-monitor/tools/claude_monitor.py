@@ -693,6 +693,7 @@ def build_state() -> dict:
     sessions = []
     branches: dict[str, str | None] = {}
     repos: dict[str, tuple[str, str | None, str | None]] = {}
+    roots: dict[str, str | None] = {}  # cwd -> the backlog's repository root, if any
     procs = proc_table()
     # `waitingFor` only ever arrives for the session the server itself runs in, so it is
     # an overlay on the registry rather than the list itself
@@ -708,6 +709,7 @@ def build_state() -> dict:
         except OSError:
             mtime = 0
         subs = subagents(path, sid) if path else []
+        backlog_root(s.get("cwd", ""), roots)  # for the tab count below; walks up, no reads
         branch = git_branch(s.get("cwd", ""), branches) or t["branch"]
         repo, worktree, repo_url = git_repo(s.get("cwd", ""), repos)
         pr = pull_request(s.get("cwd", ""), branch, repo_url)
@@ -757,6 +759,13 @@ def build_state() -> dict:
         "thinking": sum(s["tokens"]["thinking"] for s in sessions),
         "turns": sum(s["turns"] for s in sessions),
         "context": sum(s["context"] for s in sessions),
+        # how many open projects have a backlog at all - on a machine with none the board
+        # would be an empty page behind a tab, so the page leaves the tab out. The same
+        # test the board itself uses: a file that parses to nothing is not a backlog.
+        "backlogs": sum(
+            1 for r in {r for r in roots.values() if r}
+            if read_backlog(Path(r) / "BACKLOG.md")
+        ),
     }
     return {
         "now": time.time(),
@@ -1226,7 +1235,10 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
 .th:hover{border-color:var(--dim);color:var(--fg)}
 .tabs{display:inline-flex;gap:6px;margin-bottom:14px}
 .tab{background:none;border:1px solid var(--line);border-radius:6px;color:var(--dim);
-     font:inherit;font-size:12px;padding:3px 10px;cursor:pointer}
+     font:inherit;font-size:12px;padding:3px 10px;cursor:pointer;
+     display:inline-flex;align-items:center;gap:6px}
+.tab svg{width:11px;height:11px;flex:none;opacity:.8}
+.tab.on svg{opacity:1;color:var(--bar)}
 .tab:hover{border-color:var(--dim);color:var(--fg)}
 .tab.on{border-color:var(--bar);color:var(--fg)}
 /* the backlog: a list to scan on the left, one ticket open on the right - a ticket is
@@ -1263,6 +1275,14 @@ h1{font-size:16px;margin:0 0 2px;font-weight:650}
    is a picture of. A row of the table is the filter for the chart above it. --- */
 .st-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
 .st-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--dim)}
+/* the one control in the row that does something rather than filters something, so it sits
+   apart from the two segmented pickers */
+.rf{background:none;border:1px solid var(--line);border-radius:7px;color:var(--dim);
+    font:inherit;font-size:12px;padding:3px 10px;cursor:pointer;margin-left:auto;
+    display:inline-flex;align-items:center;gap:6px}
+.rf:hover{border-color:var(--dim);color:var(--fg)}
+.rf:disabled{cursor:default;opacity:.6}
+.rf b{font-weight:inherit;font-size:13px;line-height:1}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
 .seg button{background:none;border:none;border-right:1px solid var(--line);color:var(--dim);
             font:inherit;font-size:12px;padding:3px 10px;cursor:pointer}
@@ -1327,9 +1347,9 @@ document.documentElement.dataset.theme = _th === "light" || _th === "dark" ? _th
 <h1>Claudemon</h1>
 <div class="sub" id="sub">loading…</div>
 <div class="tabs">
-  <button class="tab on" data-v="sessions" onclick="setView('sessions')">sessions</button>
-  <button class="tab" data-v="backlog" onclick="setView('backlog')">backlog</button>
-  <button class="tab" data-v="stats" onclick="setView('stats')">statistics</button>
+  <button class="tab on" data-v="sessions" onclick="setView('sessions')"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect width="5" height="5" rx="1.2"/><rect x="7" width="5" height="5" rx="1.2"/><rect y="7" width="5" height="5" rx="1.2"/><rect x="7" y="7" width="5" height="5" rx="1.2"/></svg>sessions</button>
+  <button class="tab" data-v="backlog" onclick="setView('backlog')"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect y="1" width="3" height="3" rx="1"/><rect x="4.7" y="2" width="7.3" height="1.4" rx=".7"/><rect y="8" width="3" height="3" rx="1"/><rect x="4.7" y="9" width="7.3" height="1.4" rx=".7"/></svg>backlog</button>
+  <button class="tab" data-v="stats" onclick="setView('stats')"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect y="6" width="3" height="6" rx="1"/><rect x="4.5" y="2" width="3" height="10" rx="1"/><rect x="9" y="4" width="3" height="8" rx="1"/></svg>statistics</button>
 </div>
 <div class="kpis" id="kpis"></div>
 <div class="grid" id="grid"></div>
@@ -1684,7 +1704,31 @@ const RANGES = [[30, "30 days"], [90, "90 days"], [0, "all"]];
 // archive is read once an hour and the view sits still in between - no fetch, no repaint.
 // `re-read now` in the sub line is there for the moment you do want it sooner.
 const STATS_TTL = 36e5;
-let stats = null, statsAt = 0, stPainted = false;
+let stats = null, statsAt = 0, stPainted = false, stBusy = false;
+
+// The payload outlives a reload in localStorage, so opening the tab does not have to wait on
+// a read of the whole archive before it can show anything. It stays a cache and nothing more:
+// the hourly rule above decides whether what came out of it is still good enough, and the
+// stamp says when it was actually read, not when it was pulled out of storage.
+const STATS_MAX = 2e6;  // a quota error would take the theme and the chosen view down with it
+
+function stRestore(){
+  const c = load("stats", null);
+  // shape check, not paranoia - the payload's shape belongs to the version of the plugin
+  // that wrote it, and a browser keeps storage across an update
+  if(!c || !c.at || !c.data || !Array.isArray(c.data.projects)) return;
+  stats = c.data;
+  statsAt = c.at;
+}
+
+function stStore(){
+  try {
+    const raw = JSON.stringify({at: statsAt, data: stats});
+    if(raw.length < STATS_MAX) localStorage.setItem(LS + "stats", raw);
+  } catch (e) {}  // private windows, storage off, quota - none of it is worth a broken view
+}
+
+stRestore();
 let stRange = load("st-range", 90);
 let stMetric = load("st-metric", "total");  // everything sent and written, or the output alone
 let stPick = load("st-pick", null);         // repository root; null is every project at once
@@ -1867,6 +1911,8 @@ function paintStats(){
     + `<span class="st-lbl">range</span>${seg("range", RANGES, stRange)}`
     + `<span class="st-lbl">count</span>`
     + seg("metric", [["total", "all tokens"], ["output", "output only"]], stMetric)
+    + `<button class="rf" onclick="refreshStats(this)" title="read the archive again now">`
+    + `<b>\u21bb</b>refresh</button>`
     + `</div>`
     + `<div class="kpis">`
     + kpi(n(stTotal(sum)), "tokens total") + kpi(n(sum[1]), "output tokens")
@@ -1880,12 +1926,14 @@ function paintStats(){
     + (pick ? ` · the rest of the bar is every other project` : ``)
     + (pick ? ` · <a href="#" onclick="stSet('pick',${arg(stPick)});return false">clear</a>` : ` · pick a project below to single it out`)
     + `</div><div id="ch"></div>`
-    + (pick ? `<div class="lg"><span><i style="background:var(--bar)"></i>`
-        + `${esc(pick.p.name)}</span><span><i style="${REST_SWATCH}"></i>`
-        + `other projects</span></div>` : ``)
+    // the legend is there whether or not a project is picked - it names what the accent
+    // means either way, and a line that comes and goes shoves the whole table up and down
+    + `<div class="lg"><span><i style="background:var(--bar)"></i>`
+    + `${pick ? esc(pick.p.name) : "all projects"}</span>`
+    + (pick ? `<span><i style="${REST_SWATCH}"></i>other projects</span>` : ``)
     + `</div>`
-    + `<div class="pane"><h3>Projects</h3>`
-    + `<div class="cap">${esc(unit)} in this range · click a row to single it out</div>`
+    + `</div>`
+    + `<div class="pane">`
     + `<div class="pt-wrap"><table class="pt"><thead><tr><th>project</th><th>trend</th><th>share</th>`
     + `<th>${esc(unit)}</th>`
     + (stMetric === "output" ? `` : `<th>output</th>`)  // the metric column already is it
@@ -1942,16 +1990,30 @@ addEventListener("mousemove", e => {
 // different question from the one the other two views ask their tick
 function stampStats(){
   document.getElementById("sub").innerHTML =
-    "archive read " + new Date(statsAt).toLocaleTimeString() + " \u00b7 re-read hourly \u00b7 "
-    + `<button class="iv" onclick="tickStats(true)">re-read now</button>`;
+    "archive read " + new Date(statsAt).toLocaleTimeString() + " \u00b7 re-read hourly";
+}
+
+// the row is rebuilt by the repaint that ends the read, so the button has no state to put
+// back - it only has to say it heard the click
+async function refreshStats(btn){
+  btn.disabled = true;
+  btn.innerHTML = `<i class="spin"></i>reading\u2026`;
+  await tickStats(true);
 }
 
 async function tickStats(force){
   const stale = force || !stats || Date.now() - statsAt > STATS_TTL;
   if(!stale && stPainted) return;  // nothing has happened that the page does not already show
   if(stale){
-    stats = await (await fetch("/api/stats")).json();
-    statsAt = Date.now();
+    // a cold read takes over a second and `statsAt` only moves when it lands, so without
+    // this the ticks that fall inside it would each start a read of their own
+    if(stBusy) return;
+    stBusy = true;
+    try {
+      stats = await (await fetch("/api/stats")).json();
+      statsAt = Date.now();
+      stStore();
+    } finally { stBusy = false; }
   }
   stPainted = true;
   stampStats();
@@ -1963,6 +2025,25 @@ async function tickStats(force){
 const VIEWS = ["sessions", "backlog", "stats"];
 let view = load("view", "sessions");
 if(!VIEWS.includes(view)) view = "sessions";
+
+// The board is only meaningful where an open project has a BACKLOG.md; on a machine with
+// none the tab opens an empty page, so it is not shown at all. The answer arrives with the
+// first poll, which is a tick away - so the last one is remembered, otherwise the tab would
+// flicker in or out on every load.
+let hasBacklog = load("has-backlog", true);
+if(view === "backlog" && !hasBacklog) view = "sessions";
+
+function paintBacklogTab(){
+  document.querySelector('.tab[data-v="backlog"]').hidden = !hasBacklog;
+}
+
+function setBacklogTab(on){
+  if(on === hasBacklog) return;
+  hasBacklog = on;
+  save("has-backlog", on);
+  paintBacklogTab();
+  if(!on && view === "backlog") setView("sessions");  // the board just went away under it
+}
 function setView(v){
   view = v;
   save("view", v);
@@ -1987,6 +2068,7 @@ function stamp(){
 
 async function tickBacklog(){
   const d = await (await fetch("/api/backlog")).json();
+  setBacklogTab(d.projects.length > 0);
   stamp();
   document.getElementById("backlog").innerHTML = board(d);
   document.title = (d.waiting ? `(${d.waiting}) ` : "") + "Claudemon";
@@ -1998,6 +2080,7 @@ async function tick(){
     if(view === "stats"){ await tickStats(); return; }
     const d = await (await fetch("/api/state")).json();
     const T = d.totals, now = d.now;
+    setBacklogTab(T.backlogs > 0);
     const U = d.usage;
     stamp();
     document.getElementById("kpis").innerHTML =
@@ -2024,6 +2107,7 @@ async function tick(){
   }
 }
 applyTheme();  // the early script set the palette, this puts the choice on the button
+paintBacklogTab();
 setView(view);  // the markup ships with sessions open; a restored view has to take over
 arm();
 </script>
