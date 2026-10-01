@@ -1267,11 +1267,15 @@ h1{font-size:16px;margin:0 0 16px;font-weight:650}
          padding:6px 9px;margin:0 0 9px;font-size:12.5px;line-height:1.4}
 .att-row b{color:var(--att-ink)}
 .att-row .d{color:var(--dim);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.att-row .say{margin-top:4px;color:var(--dim);cursor:pointer;overflow:hidden;
-              display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-.att-row .say::before{content:"\25be ";color:var(--att-ink)}
-.att-row .say.open{display:block;white-space:pre-wrap}
-.att-row .say.open::before{content:"\25b4 "}
+.att-row .say{margin-top:4px;color:var(--dim);cursor:pointer;overflow:hidden;position:relative;
+              padding-left:11px;max-height:5.6em}
+.att-row .say::before{content:"\25be";color:var(--att-ink);position:absolute;left:0;top:0}
+.att-row .say.open{max-height:none}
+.att-row .say.open::before{content:"\25b4"}
+.att-row .say p,.att-row .say ul,.att-row .say pre{margin:0 0 3px}
+.att-row .say ul{padding-left:14px}
+.att-row .say pre{white-space:pre-wrap;font-size:11.5px}
+.att-row .say b{color:var(--fg)}
 .kpi.att b{color:var(--att-ink)}
 .repo,.branch,.wt{font-size:12px;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .repo,.branch{color:var(--fg);opacity:.75}
@@ -1616,7 +1620,7 @@ function card(s, now){
   const att = a ? `<div class="att-row">&#9203; <b>${esc(a.label)}</b> &middot; ${ago(a.since, now)}
       ${a.detail ? `<span class="d">${esc(a.detail)}</span>` : ""}
       ${said ? `<div class="say${expanded.has(s.sessionId) ? " open" : ""}"
-        data-sid="${esc(s.sessionId)}" title="click to expand">${esc(said.text)}</div>` : ""
+        data-sid="${esc(s.sessionId)}" title="click to expand">${sayMd(said.text)}</div>` : ""
       }</div>` : "";
   return `<div class="card ${st}${details.has(s.sessionId) ? " det" : ""}">
     <div class="head"><h2>${esc(s.name)}</h2>
@@ -1656,6 +1660,37 @@ function card(s, now){
 // prose. No labels are hardcoded: whatever `**Foo:**` the file uses is what shows up.
 const md = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>")
                       .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+
+// The last reply is markdown as the model wrote it - enough of it to read: paragraphs,
+// bullets, headings as bold lines, fences. Folded it shows four lines, not two, because
+// the first line is usually a greeting and the point is in the next ones.
+function sayMd(text){
+  const out = [];
+  let para = [], list = [], pre = null;
+  const endPara = () => { if(para.length){ out.push(`<p>${md(para.join(" "))}</p>`); para = []; } };
+  const endList = () => {
+    if(list.length){ out.push(`<ul>${list.map(l => `<li>${md(l)}</li>`).join("")}</ul>`); list = []; }
+  };
+  const flush = () => { endPara(); endList(); };
+  for(const line of text.split("\n")){
+    const t = line.trim();
+    if(t.startsWith("```")){
+      if(pre === null){ flush(); pre = []; }
+      else { out.push(`<pre>${esc(pre.join("\n"))}</pre>`); pre = null; }
+      continue;
+    }
+    if(pre !== null){ pre.push(line); continue; }
+    const li = t.match(/^(?:[-*+]|\d+[.)])\s+(.*)/);
+    const h = t.match(/^#{1,6}\s+(.*)/);
+    if(li){ endPara(); list.push(li[1]); }
+    else if(h){ flush(); out.push(`<p><b>${md(h[1])}</b></p>`); }
+    else if(t){ endList(); para.push(t); }
+    else flush();
+  }
+  if(pre !== null) out.push(`<pre>${esc(pre.join("\n"))}</pre>`);
+  flush();
+  return out.join("");
+}
 
 // Line by line, because a ``` fence is not always surrounded by blank lines - and an
 // inline-code regex let loose across one swallows the rest of the ticket.
