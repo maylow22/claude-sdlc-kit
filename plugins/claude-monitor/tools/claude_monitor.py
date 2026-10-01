@@ -834,6 +834,7 @@ def build_state() -> dict:
         "thinking": sum(s["tokens"]["thinking"] for s in sessions),
         "turns": sum(s["turns"] for s in sessions),
         "context": sum(s["context"] for s in sessions),
+        "work": work_today(),
         # how many open projects have a backlog at all - on a machine with none the board
         # would be an empty page behind a tab, so the page leaves the tab out. The same
         # test the board itself uses: a file that parses to nothing is not a backlog.
@@ -858,7 +859,7 @@ def build_state() -> dict:
 # The archive is ~500 MB and a cold pass over it takes about a second, which is why the
 # aggregate per file is kept: a transcript only ever grows, so every later pass reads the
 # tail that arrived since. What is kept per file is small - one row per calendar day.
-_stats: dict[str, dict] = {}  # transcript path -> {offset, req, cwd, days}
+_stats: dict[str, dict] = {}  # transcript path -> {offset, req, cwd, days, work}
 _stats_proj: dict[str, tuple[str, str]] = {}  # cwd -> (repository root, name)
 _day_of: dict[str, str] = {}  # timestamp hour -> local calendar day
 
@@ -916,9 +917,9 @@ def stats_scan(path: Path) -> dict:
     try:
         size = path.stat().st_size
     except OSError:
-        return c or {"offset": 0, "req": None, "cwd": "", "days": {}}
+        return c or {"offset": 0, "req": None, "cwd": "", "days": {}, "work": {}}
     if c is None or size < c["offset"]:  # new file or truncation
-        c = _stats[key] = {"offset": 0, "req": None, "cwd": "", "days": {}}
+        c = _stats[key] = {"offset": 0, "req": None, "cwd": "", "days": {}, "work": {}}
     if size == c["offset"]:
         return c
 
@@ -940,6 +941,11 @@ def stats_scan(path: Path) -> dict:
                 c["cwd"] = json.loads(raw).get("cwd") or ""
             except ValueError:
                 pass
+        if b'"turn_duration"' in raw:
+            span = turn_span(raw)
+            if span:
+                c["work"].setdefault(span[0], []).append(span[1:])
+            continue
         if b'"usage"' not in raw:  # most lines are prompts and tool results
             continue
         try:
@@ -970,8 +976,57 @@ def stats_scan(path: Path) -> dict:
     return c
 
 
+def turn_span(raw: bytes) -> tuple[str, float, float] | None:
+    """(local day, start, end) of one turn, from the `turn_duration` line Claude Code
+    writes when the turn ends - which is what makes the time an agent actually worked
+    readable at all: the time between prompts, spent waiting on the user, is not in it."""
+    try:
+        e = json.loads(raw)
+        ts = e["timestamp"]
+        end = calendar.timegm(time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S"))
+        ms = float(e["durationMs"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    day = day_of(ts)
+    return (day, end - ms / 1000, end) if day else None
+
+
+def work_of(spans: list) -> list[int]:
+    """[agent seconds, wall seconds] of a set of turns. Three sessions working through the
+    same hour are three hours of agent time and one of the clock - the union of the spans,
+    which is the number that says how long somebody had agents running at all."""
+    busy = sum(b - a for a, b in spans)
+    wall, reach = 0.0, None
+    for a, b in sorted(spans):
+        if reach is None or a > reach:
+            wall += b - a
+            reach = b
+        elif b > reach:
+            wall += b - reach
+            reach = b
+    return [round(busy), round(wall)]
+
+
+def work_today() -> list[int]:
+    """Today's work across every session - main transcripts only: a subagent runs inside
+    its parent's turn, which already holds its time. Only what was written to today can
+    have a turn that ended today, so the rest of the archive is not even opened."""
+    today = time.strftime("%Y-%m-%d")
+    midnight = time.mktime(time.strptime(today, "%Y-%m-%d"))
+    spans: list = []
+    for path in PROJECTS.glob("*/*.jsonl"):
+        try:
+            if path.stat().st_mtime < midnight:
+                continue
+        except OSError:
+            continue
+        spans += stats_scan(path)["work"].get(today, [])
+    return work_of(spans)
+
+
 def build_stats() -> dict:
     projects: dict[str, dict] = {}
+    work: dict[str, list] = {}  # day -> spans of every project, for the wall clock
     for path in PROJECTS.rglob("*.jsonl"):
         c = stats_scan(path)
         if not c["days"]:
@@ -979,11 +1034,15 @@ def build_stats() -> dict:
         root, name = project_of(c["cwd"] or str(path.parent), _stats_proj)
         p = projects.get(root)
         if p is None:
-            p = projects[root] = {"name": name, "path": root, "sessions": 0, "days": {}}
+            p = projects[root] = {"name": name, "path": root, "sessions": 0, "days": {},
+                                  "work": {}}
         # a transcript directly under the project directory is a session; anything deeper
         # is a subagent or a workflow of one, and would count the same session again
         if path.parent.parent == PROJECTS:
             p["sessions"] += 1
+            for day, spans in c["work"].items():
+                p["work"].setdefault(day, []).extend(spans)
+                work.setdefault(day, []).extend(spans)
         for day, v in c["days"].items():
             d = p["days"].get(day)
             if d is None:
@@ -1013,10 +1072,18 @@ def build_stats() -> dict:
                 # axis is the page's to build: the archive has gaps, and a gap is a day
                 # with no work, not a day to leave out
                 "days": {d: v for d, v in sorted(p["days"].items())},
+                # day -> [agent seconds, wall seconds]; see work_of()
+                "work": {d: work_of(v) for d, v in p["work"].items()},
             }
         )
     out.sort(key=lambda p: -p["total"])
-    return {"now": time.time(), "projects": out}
+    return {
+        "now": time.time(),
+        "projects": out,
+        # the wall clock across projects is not the sum of theirs - two projects worked on
+        # at once are one hour, not two - so it is measured over all the spans together
+        "work": {d: work_of(v) for d, v in sorted(work.items())},
+    }
 
 
 # --- The project backlog (the `feature` plugin's `backlog` skill describes the file) ---
@@ -1416,6 +1483,8 @@ h1{font-size:16px;margin:0 0 16px;font-weight:650}
        text-transform:uppercase;letter-spacing:.04em}
 .tip div{display:flex;justify-content:space-between;gap:16px;line-height:1.5}
 .tip span{color:var(--dim)}
+.desc{position:absolute;top:18px;right:18px;max-width:min(440px,55vw);text-align:right;
+      font-size:12px;line-height:1.45;color:var(--dim)}
 .tip em{font-style:normal;font-variant-numeric:tabular-nums}
 .tip i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px}
 .st-none{color:var(--dim);font-size:13px}
@@ -1435,6 +1504,7 @@ document.documentElement.dataset.theme = _th === "light" || _th === "dark" ? _th
   <span class="ver">__VERSION__</span>
   <button class="th" onclick="cycleTheme()"></button>
 </div>
+<div class="desc" id="desc"></div>
 <h1>Claudemon</h1>
 <div class="tabs">
   <button class="tab on" data-v="sessions" onclick="setView('sessions')"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect width="5" height="5" rx="1.2"/><rect x="7" width="5" height="5" rx="1.2"/><rect y="7" width="5" height="5" rx="1.2"/><rect x="7" y="7" width="5" height="5" rx="1.2"/></svg>sessions</button>
@@ -1451,12 +1521,24 @@ const n = v => v >= 1e6 ? (v/1e6).toFixed(2)+"M" : v >= 1e3 ? Math.round(v/1e3)+
 const dur = s => s < 60 ? Math.round(s)+" s" : s < 3600 ? Math.round(s/60)+" min"
   : s < 86400 ? (s/3600).toFixed(1)+" h" : (s/86400).toFixed(1)+" d";
 const ago = (t, now) => dur(Math.max(0, now - t));
+// worked time stays in hours however long the range - "8.3 d" of work reads as days on end
+const hrs = s => s < 3600 ? Math.round(s/60)+" min"
+  : s < 360000 ? (s/3600).toFixed(1)+" h" : Math.round(s/3600)+" h";
 // quotes included: most of what goes through esc() lands in an attribute, and a repository
 // path or a ticket title is allowed to contain one
 const esc = s => (s||"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",
   '"':"&quot;","'":"&#39;"}[c]));
 
-function kpi(v, l, c){ return `<div class="kpi ${c||""}"><b>${v}</b><span>${l}</span></div>`; }
+// what a tile means is said in the corner, not in a tooltip: Safari's Dock app shows no
+// `title` at all, and a box over the tiles covers the very numbers being asked about
+const descOf = d => `data-desc="${esc(d)}"`;
+function kpi(v, l, c, d){
+  return `<div class="kpi ${c||""}"${d ? " " + descOf(d) : ""}><b>${v}</b><span>${l}</span></div>`;
+}
+addEventListener("mouseover", e => {
+  const t = e.target instanceof Element ? e.target.closest("[data-desc]") : null;
+  document.getElementById("desc").textContent = t ? t.dataset.desc : "";
+});
 
 // Everything the user picks in the header or on the board lives in a plain variable,
 // because both the grid and the board are rebuilt from `innerHTML` on every tick. That
@@ -1557,8 +1639,9 @@ function planKpis(u, now){
     const cls = (p >= 90 || l.severity === "critical") ? "max"
               : (p >= 70 || l.severity === "warning") ? "hot" : "";
     const at = l.resetsAt ? resetAt(l.resetsAt, now) : "?";
-    return `<div class="kpi plan ${cls}${l.active ? " on" : ""}"`
-      + ` title="${esc(l.label)} · fetched ${got}">`
+    return `<div class="kpi plan ${cls}${l.active ? " on" : ""}" `
+      + descOf(`${l.label}: how much of this plan limit is used; the window resets ${at}.`
+        + ` Fetched ${got}.`) + `>`
       + `<b>${Math.round(p)} %</b><span>${esc(at)}`
       + `${l.tag ? " (" + esc(l.tag) + ")" : ""}</span>`
       + `<div class="bar"><i style="width:${p}%"></i></div></div>`;
@@ -1920,6 +2003,13 @@ function stAgg(p, days){
   return a;
 }
 const stTotal = a => a[0] + a[1] + a[2] + a[3];
+// [agent seconds, wall seconds] over a set of days - of one project, or of `stats.work`
+// for all of them. `|| {}`: a payload cached by a version without it is still served
+function stWork(w, days){
+  const a = [0, 0];
+  for(const d of days){ const r = (w || {})[d]; if(r){ a[0] += r[0]; a[1] += r[1]; } }
+  return a;
+}
 const stMetricOf = a => stMetric === "output" ? a[1] : stTotal(a);
 
 // the axis wants a number to glance at; the exact one is a hover away, which is what
@@ -2029,7 +2119,7 @@ function paintStats(){
   // this one table of numbers seen from different sides
   const rows = stats.projects.map(p => {
     const a = stAgg(p, b.days);
-    return {p, a, total: stTotal(a), metric: stMetricOf(a),
+    return {p, a, work: stWork(p.work, b.days)[0], total: stTotal(a), metric: stMetricOf(a),
             spark: b.list.map(ds => stMetricOf(stAgg(p, ds)))};
   }).filter(r => r.total > 0).sort((x, y) => y.metric - x.metric);
   if(!rows.length){ el.innerHTML = `<div class="st-none">no tokens in this range.</div>`; return; }
@@ -2043,6 +2133,7 @@ function paintStats(){
   const sum = [0, 0, 0, 0, 0];
   for(const r of rows) for(let i = 0; i < 5; i++) sum[i] += r.a[i];
   const T = {input: sum[0], cache_read: sum[2], cache_write: sum[3]};
+  const W = stWork(stats.work, b.days);
   const top = cols.reduce((m, c) => c.all > m.all ? c : m, cols[0]);
   const pick = rows.find(r => r.p.path === stPick);
   const unit = stMetric === "output" ? "output tokens" : "tokens";
@@ -2056,9 +2147,19 @@ function paintStats(){
     + `<b>\u21bb</b>refresh</button>`
     + `</div>`
     + `<div class="kpis">`
-    + kpi(n(stTotal(sum)), "tokens total") + kpi(n(sum[1]), "output tokens")
-    + kpi(hit(T), "cache hit") + kpi(n(sum[4]), "turns")
-    + kpi(rows.length, "projects") + kpi(short(top.from), "busiest " + (b.size > 1 ? "week" : "day"))
+    + kpi(n(stTotal(sum)), "tokens total", "", "Every token in the range - input, output,"
+      + " cache read and cache write.")
+    + kpi(n(sum[1]), "output tokens", "", "Tokens the model wrote in the range.")
+    + kpi(hit(T), "cache hit", "", "Share of the input side served from the prompt cache.")
+    + kpi(n(sum[4]), "turns", "", "Requests made to the model in the range.")
+    + kpi(hrs(W[0]), "work time", "", "How long agents worked in the range, every"
+      + " session's turns added up - three sessions busy through one hour are three hours.")
+    + kpi(hrs(W[1]), "work time netto", "", "How long in the range at least one agent was"
+      + " working - the same hour with three sessions busy counts once.")
+    + kpi(rows.length, "projects", "", "Projects with tokens in the range - a repository's"
+      + " worktrees and subdirectories count as one.")
+    + kpi(short(top.from), "busiest " + (b.size > 1 ? "week" : "day"), "", "The "
+      + (b.size > 1 ? "week" : "day") + " with the most " + unit + " in the range.")
     + `</div>`
     + `<div class="pane">`
     + `<h3>${esc(pick ? pick.p.name : "All projects")} · ${unit} over time</h3>`
@@ -2078,7 +2179,7 @@ function paintStats(){
     + `<div class="pt-wrap"><table class="pt"><thead><tr><th>project</th><th>trend</th><th>share</th>`
     + `<th>${esc(unit)}</th>`
     + (stMetric === "output" ? `` : `<th>output</th>`)  // the metric column already is it
-    + `<th>cache hit</th><th>turns</th>`
+    + `<th>cache hit</th><th>turns</th><th>work time</th>`
     + `<th>sessions</th></tr></thead><tbody>`
     + rows.map(r => {
         const share = stMetricOf(sum) ? r.metric / stMetricOf(sum) : 0;
@@ -2092,7 +2193,7 @@ function paintStats(){
           + `<td>${n(r.metric)}</td>`
           + (stMetric === "output" ? `` : `<td>${n(r.a[1])}</td>`)
           + `<td>${hit({input: r.a[0], cache_read: r.a[2], cache_write: r.a[3]})}</td>`
-          + `<td>${n(r.a[4])}</td><td>${r.p.sessions}</td></tr>`;
+          + `<td>${n(r.a[4])}</td><td>${hrs(r.work)}</td><td>${r.p.sessions}</td></tr>`;
       }).join("")
     + `</tbody></table></div>`
     + `<div class="cap" style="margin:10px 0 0">sessions is the whole archive; every other`
@@ -2231,19 +2332,30 @@ async function tick(){
       : "";
     document.getElementById("kpis").innerHTML =
       planKpis(U, now)
-      + kpi(T.sessions, "sessions", "more-only") + kpi(T.busy, "busy", "more-only")
-      + `<div class="kpi more-only${T.waiting ? " att" : ""}"><b>${T.waiting}</b>`
-      + `<span>need you</span></div>`
-      + kpi(n(T.context), "context total", "more-only")
-      + kpi(n(T.output), "output tokens", "more-only")
-      + kpi(hit(T), "cache hit", "more-only")
-      + kpi(T.subagents, "subagents", "more-only")
-      + kpi(T.turns, "turns", "more-only")
-      + kpi(n(T.input), "input tokens", "more-only")
-      + kpi(n(T.thinking), "thinking", "more-only")
-      + kpi(n(T.cache_read), "cache read", "more-only")
-      + kpi(n(T.cache_write), "cache write", "more-only")
-      + (U ? kpi(esc(U.plan), "plan", "more-only") : "")
+      + kpi(hrs(T.work[0]), "worked today", "", "How long agents worked today, every session's"
+        + " turns added up - three sessions busy through one hour are three hours. Time spent"
+        + " waiting on you is not in it.")
+      + kpi(hrs(T.work[1]), "worked today netto", "more-only", "How long today at least one agent"
+        + " was working - the same hour with three sessions busy counts once.")
+      + kpi(T.sessions, "sessions", "more-only", "Claude Code sessions open on this machine.")
+      + kpi(T.busy, "busy", "more-only", "Sessions working on a turn right now.")
+      + `<div class="kpi more-only${T.waiting ? " att" : ""}" `
+      + descOf("Sessions waiting on you - a permission to grant or a prompt to answer.")
+      + `><b>${T.waiting}</b><span>need you</span></div>`
+      + kpi(n(T.context), "context total", "more-only",
+        "Context window in use, summed over the open sessions.")
+      + kpi(n(T.output), "output tokens", "more-only", "Tokens the model wrote in the open sessions.")
+      + kpi(hit(T), "cache hit", "more-only", "Share of the input side served from the prompt"
+        + " cache - what keeps a long session cheap.")
+      + kpi(T.subagents, "subagents", "more-only", "Subagents spawned by the open sessions.")
+      + kpi(T.turns, "turns", "more-only", "Requests made to the model by the open sessions.")
+      + kpi(n(T.input), "input tokens", "more-only",
+        "Input tokens sent to the model outside the cache.")
+      + kpi(n(T.thinking), "thinking", "more-only", "Output tokens spent on extended thinking.")
+      + kpi(n(T.cache_read), "cache read", "more-only", "Input tokens read from the prompt cache.")
+      + kpi(n(T.cache_write), "cache write", "more-only",
+        "Input tokens written to the prompt cache.")
+      + (U ? kpi(esc(U.plan), "plan", "more-only", "The Claude plan this account is on.") : "")
       + `<button class="more" onclick="toggleKpis()"><i>\u2192</i><span>show more</span></button>`;
     paintKpiFold();
     document.getElementById("grid").innerHTML = d.sessions.map(s => card(s, now)).join("");

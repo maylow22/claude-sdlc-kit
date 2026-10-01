@@ -190,8 +190,12 @@ yet still lands on the right side of the sort and of the KPI count.
 - **one KPI row** — it opens with plan utilization (5 h session, weekly, weekly model) as
   percent tiles with a thin bar, the active limit framed and labelled by **when its window
   resets** — a clock time for the 5 h block (`14:20 (5 h)`), a date for the weekly ones
-  (`27/09 (week)`, `27/09 (Fable)`); the long label is in the tooltip. Those three tiles are
-  the whole row at rest — the counts and every token number sit behind **show more**
+  (`27/09 (week)`, `27/09 (Fable)`). After them **how long
+  the agents worked today** (`worked today`, see [worked time](#worked-time)). Those four
+  tiles are the whole row at rest — the counts and
+  every token number sit behind **show more**. Hovering a tile says what it means in the
+  top-right corner, as plain text — not a `title` tooltip, which Safari's Dock app never shows,
+  and not a box over the tiles, which would cover the numbers being asked about
 - **which session this is** — the card is headed by the **session's own name** (`hx-anon`,
   `claude-sdlc-kit-c3`), because that is what tells two sessions in one repository apart. Under
   it the checkout, a line each: the repository, the branch, and — only for a linked worktree —
@@ -206,7 +210,7 @@ yet still lands on the right side of the sort and of the KPI count.
   kind (interactive/background), pid, turns, how long ago the session was last active, and
   the token breakdown (output, input, cache read/write, thinking). It is per card, and the
   card keeps it open across the repaint every refresh does
-- **folded away** — subagents, turns, input tokens, thinking, cache read/write, plan tier.
+- **folded away** — worked today netto, subagents, turns, input tokens, thinking, cache read/write, plan tier.
   Always visible instead: sessions, busy, need you, context total, output tokens and **cache
   hit** (the share of the input side served from the cache — what keeps a long session cheap)
 - **theme** — dark, light or by the system, cycled with the button at the right end of the footer
@@ -319,6 +323,25 @@ old what you are looking at is (`archive read 14:31:09 · re-read hourly`) and c
 **re-read now** button for the moment you want it sooner; switching to the tab with nothing
 cached reads it too.
 
+### Worked time
+
+Claude Code ends every turn with a `turn_duration` line — how long the turn ran, with the
+time it ended. Summed up, that is the time agents spent working; the time between prompts,
+waiting on you, is not in it. It is told two ways, because they answer different questions:
+
+- **work time** — the turns added up. Three sessions working through the same hour are three
+  hours.
+- **work time netto** — the union of the turns on the clock, so that same hour is one. How long you
+  had agents running at all.
+
+Only the session transcripts count: a subagent runs inside its parent's turn, which already
+holds its time. A turn belongs to the day it ended on. Transcripts written by a Claude Code
+too old to log `turn_duration` contribute nothing, so the earlier archive under-reports.
+
+The sessions view shows `worked today`, with `worked today netto` behind **show more** (read from the
+transcripts written to today, every tick); the statistics view has both over the range as tiles
+and work time per project in the table.
+
 ## Who may talk to the server
 
 The server is bound to the loopback, and that on its own settles less than it looks: a page on
@@ -368,6 +391,7 @@ not run the dashboard (`CLAUDE_MONITOR_AUTOSTART=0`).
 | restart + URL into the session | `hooks/session-start.sh` → `tools/restart.sh` (SessionStart hook) |
 | the reason for waiting on the user | `hooks/notification.py` → `~/.claude/monitor/notify/<sessionId>.json` |
 | per-project statistics | every `*.jsonl` under `~/.claude/projects` (the nested subagent and workflow transcripts included) → `.message.usage` by `.timestamp`, grouped by the repository root of `.cwd` |
+| worked time | session transcripts only → `system` lines with `subtype: turn_duration` (`.durationMs` ending at `.timestamp`) |
 | the backlog board | `BACKLOG.md` + `BACKLOG.done.md` in the repository root of an open session's `cwd` (parsed only when the file changes) |
 | which ticket is being worked on | `git branch --show-current` in each backlog project's root, matched against the ticket's field values (backticks stripped, compared whole) |
 | the app hosting a session | `ps -Ao pid,ppid,tty,command` — one call per refresh, the parent chain is walked in memory; where the process table is refused, no app is found and the button is simply not rendered |
@@ -389,7 +413,7 @@ whether the file is small or several megabytes.
   `/usage` in any session refreshes it too and resets that clock. The headless run has
   `CLAUDE_MONITOR_AUTOSTART=0` — its SessionStart hook would otherwise restart the server that
   started it. Claude Code refetches only once its copy is over about a minute old. When it was last
-  fetched is in the footer and in the tooltip of the plan tiles.
+  fetched is in the footer and in the description of the plan tiles.
 - A `Notification` hook record is only invalidated by a write to the transcript. After you
   approve a permission, though, nothing is written to the transcript until the tool finishes —
   so for a long command "waiting for tool permission" can hang around for a while after you
