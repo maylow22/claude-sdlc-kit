@@ -1204,7 +1204,7 @@ PAGE = r"""<!doctype html>
       --att-soft:rgba(224,134,0,.20);--att-soft2:rgba(224,134,0,.06)}
 *{box-sizing:border-box}
 [hidden]{display:none!important}  /* .kpis/.grid set display, which beats the UA rule */
-body{margin:0;padding:18px;background:var(--bg);color:var(--fg);
+body{margin:0;padding:18px 18px 52px;background:var(--bg);color:var(--fg);
      font:14px/1.45 ui-sans-serif,-apple-system,system-ui,sans-serif}
 h1{font-size:16px;margin:0 0 16px;font-weight:650}
 .sub{color:var(--dim);font-size:12px}
@@ -1304,7 +1304,11 @@ h1{font-size:16px;margin:0 0 16px;font-weight:650}
 .sa-name{font-weight:550;white-space:nowrap}
 .sa-desc{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .sa-tok{color:var(--dim);font-variant-numeric:tabular-nums;flex:none}
-.corner{position:absolute;top:14px;right:18px;display:flex;align-items:center;gap:8px}
+/* pinned to the bottom of the window - the header row it used to be fought the tabs for the
+   width, and a status line is read last, not first */
+.foot{position:fixed;left:0;right:0;bottom:0;z-index:5;display:flex;align-items:center;gap:8px;
+      justify-content:flex-end;flex-wrap:wrap;padding:6px 18px;background:var(--bg);
+      border-top:1px solid var(--line)}
 .ver{color:var(--dim);font-size:11px;font-variant-numeric:tabular-nums}
 .th{background:none;border:1px solid var(--line);border-radius:5px;color:var(--dim);
     font:inherit;font-size:13px;line-height:1.3;padding:0 7px;cursor:pointer}
@@ -1416,10 +1420,11 @@ try { _th = JSON.parse(localStorage.getItem("claude-monitor:theme")); } catch (e
 document.documentElement.dataset.theme = _th === "light" || _th === "dark" ? _th
   : matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 </script>
-<div class="corner">
-  <button class="th" onclick="cycleTheme()"></button>
-  <span class="ver">__VERSION__</span>
+<div class="foot">
+  <span class="sub" id="usage-at"></span>
   <span class="sub" id="sub">loading…</span>
+  <span class="ver">__VERSION__</span>
+  <button class="th" onclick="cycleTheme()"></button>
 </div>
 <h1>Claudemon</h1>
 <div class="tabs">
@@ -1457,7 +1462,7 @@ function load(k, dflt){
 }
 function save(k, v){ try { localStorage.setItem(LS + k, JSON.stringify(v)); } catch (e) {} }
 
-// dark / light / by the system, cycled from the corner button. `data-theme` on the root
+// dark / light / by the system, cycled from the footer button. `data-theme` on the root
 // is the theme being painted, the stored choice can also be "system" - so the media query
 // is read here, and a system that flips while "system" is chosen repaints the page.
 const THEMES = ["system", "light", "dark"];
@@ -2210,6 +2215,11 @@ async function tick(){
     setBacklogTab(T.backlogs > 0);
     const U = d.usage;
     stamp();
+    // a tooltip is no use in the Dock app, which shows none - so it is said here as well
+    document.getElementById("usage-at").textContent = U
+      ? "usage fetched " + (U.fetchedAt ? new Date(U.fetchedAt*1000).toLocaleTimeString() : "never")
+        + " \u00b7"
+      : "";
     document.getElementById("kpis").innerHTML =
       planKpis(U, now)
       + kpi(T.sessions, "sessions", "more-only") + kpi(T.busy, "busy", "more-only")

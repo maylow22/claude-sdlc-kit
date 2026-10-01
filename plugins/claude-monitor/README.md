@@ -2,7 +2,7 @@
 
 A live dashboard of every Claude Code session running on the machine. Zero-dependency Python
 (stdlib), serving a standalone HTML page that auto-refreshes every 3 s — click the interval in
-the header to cycle it: 3 s → 10 s → 1 min → stop (a real stop, no timer at all).
+the footer to cycle it: 3 s → 10 s → 1 min → stop (a real stop, no timer at all).
 
 ```
 # usually nothing — the dashboard starts itself at session start (SessionStart hook)
@@ -209,11 +209,11 @@ yet still lands on the right side of the sort and of the KPI count.
 - **folded away** — subagents, turns, input tokens, thinking, cache read/write, plan tier.
   Always visible instead: sessions, busy, need you, context total, output tokens and **cache
   hit** (the share of the input side served from the cache — what keeps a long session cheap)
-- **theme** — dark, light or by the system, cycled with the button in the top right corner
+- **theme** — dark, light or by the system, cycled with the button at the right end of the footer
   next to the version (◑ system · ☀ light · ☾ dark). The choice is stored, so it survives a
   reload; while it is on **system**, a system that flips repaints the page under you. Both
   palettes are one set of CSS variables, so a color is defined once per theme and nowhere else
-- **version** — `vYYYYMMDD-commit` in the top right corner; the date is the **commit's**, so
+- **version** — `vYYYYMMDD-commit` in the footer pinned to the bottom of the window; the date is the **commit's**, so
   the same code always reports the same version (outside a git checkout only the file date)
 - **subagent tree** — agentType, description, how long ago it was active, a pie of its
   context fill at the end of the row (amber from 80 %) - the tokens and the model in the
@@ -388,7 +388,7 @@ whether the file is small or several megabytes.
   `/usage` in any session refreshes it too and resets that clock. The headless run has
   `CLAUDE_MONITOR_AUTOSTART=0` — its SessionStart hook would otherwise restart the server that
   started it. Claude Code refetches only once its copy is over about a minute old. When it was last
-  fetched is in the tooltip of the plan tiles.
+  fetched is in the footer and in the tooltip of the plan tiles.
 - A `Notification` hook record is only invalidated by a write to the transcript. After you
   approve a permission, though, nothing is written to the transcript until the tool finishes —
   so for a long command "waiting for tool permission" can hang around for a while after you
