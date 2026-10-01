@@ -399,6 +399,15 @@ def code_version() -> str:
     return time.strftime("v%Y%m%d", time.localtime(here.stat().st_mtime))
 
 
+def plugin_version() -> str | None:
+    """The version in plugin.json - what `claude plugin update` compares, and so what tells
+    an install apart where the commit cannot: the plugin cache is not a git checkout."""
+    try:
+        return json.loads((ASSETS.parent / ".claude-plugin" / "plugin.json").read_text())["version"]
+    except (OSError, ValueError, KeyError):
+        return None
+
+
 def git_branch(cwd: str, cache: dict[str, str | None]) -> str | None:
     """Live branch of the working directory. A branch belongs to the worktree, not
     the session - the one recorded in the transcript is stale for idle sessions."""
@@ -2250,7 +2259,8 @@ arm();
 </script>
 """
 VERSION = code_version()
-PAGE = PAGE.replace("__VERSION__", VERSION)
+PLUGIN_VERSION = plugin_version()
+PAGE = PAGE.replace("__VERSION__", f"{PLUGIN_VERSION} \u00b7 {VERSION}" if PLUGIN_VERSION else VERSION)
 
 # Before a restart replaces whatever holds the port it has to know the process is ours, and
 # `ps` cannot be relied on to say so - a process spawned by Claude Code can be refused the

@@ -213,8 +213,9 @@ yet still lands on the right side of the sort and of the KPI count.
   next to the version (◑ system · ☀ light · ☾ dark). The choice is stored, so it survives a
   reload; while it is on **system**, a system that flips repaints the page under you. Both
   palettes are one set of CSS variables, so a color is defined once per theme and nowhere else
-- **version** — `vYYYYMMDD-commit` in the footer pinned to the bottom of the window; the date is the **commit's**, so
-  the same code always reports the same version (outside a git checkout only the file date)
+- **version** — in the footer pinned to the bottom of the window: the plugin's version from
+  `plugin.json`, then `vYYYYMMDD-commit`; the date is the **commit's**, so the same code always
+  reports the same version (outside a git checkout only the file date)
 - **subagent tree** — agentType, description, how long ago it was active, a pie of its
   context fill at the end of the row (amber from 80 %) - the tokens and the model in the
   row's tooltip - and
