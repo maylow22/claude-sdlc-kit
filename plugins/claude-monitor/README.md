@@ -215,7 +215,9 @@ yet still lands on the right side of the sort and of the KPI count.
   palettes are one set of CSS variables, so a color is defined once per theme and nowhere else
 - **version** — `vYYYYMMDD-commit` in the top right corner; the date is the **commit's**, so
   the same code always reports the same version (outside a git checkout only the file date)
-- **subagent tree** — agentType, description, output tokens, how long ago it was active, and
+- **subagent tree** — agentType, description, how long ago it was active, a pie of its
+  context fill at the end of the row (amber from 80 %) - the tokens and the model in the
+  row's tooltip - and
   its state: a spinner while it thinks or runs a tool (the tooltip names the tool), ✓ once it
   has finished, ○ when it has not finished and written nothing for 15 min (interrupted, or
   its session is gone)
