@@ -788,6 +788,7 @@ def build_state() -> dict:
                 "pid": s.get("pid"),
                 "kind": s.get("kind"),
                 "status": s.get("status"),
+                "working": working(s.get("status")),
                 "attention": att,
                 "cwd": s.get("cwd", ""),
                 "repo": repo,
@@ -1191,14 +1192,14 @@ PAGE = r"""<!doctype html>
       --bg:#191817;--card:#232120;--fg:#f0eee9;--dim:#9a938a;--line:#35322f;
       --busy:#f0906a;--idle:#7cc292;--warn:#e0a94a;--bar:#d97757;--bar2:#3d3936;
       --max:#f2776b;--idle-bg:#1d1b1a;--idle-line:#2b2927;--idle-fg:#c9c2b8;
-      --rest:#746d64;
+      --rest:#746d64;--busy-line:rgba(240,144,106,.45);
       --att:#ffb02e;--att-ink:#ffb02e;--att-fg:#191817;--att-bg:#3a2c12;
       --att-soft:rgba(255,176,46,.16);--att-soft2:rgba(255,176,46,.04)}
 :root[data-theme="light"]{color-scheme:light;
       --bg:#f7f5f1;--card:#fff;--fg:#1f1d1b;--dim:#6b635a;--line:#e2ddd5;
       --busy:#c2410c;--idle:#2f7d54;--warn:#b07712;--bar:#b4451f;--bar2:#e8e2d9;
       --max:#d63f22;--idle-bg:#f2efe9;--idle-line:#e6e1d8;--idle-fg:#4b453d;
-      --rest:#948d84;
+      --rest:#948d84;--busy-line:rgba(194,65,12,.45);
       --att:#e08600;--att-ink:#8a5200;--att-fg:#191817;--att-bg:#fdf1dc;
       --att-soft:rgba(224,134,0,.20);--att-soft2:rgba(224,134,0,.06)}
 *{box-sizing:border-box}
@@ -1227,6 +1228,7 @@ h1{font-size:16px;margin:0 0 16px;font-weight:650}
 .kpi span{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
 .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.card.busy{border-color:var(--busy-line)}
 .card.idle{background:var(--idle-bg);border-color:var(--idle-line);color:var(--dim)}
 .card.idle .toks b,.card.idle h2{color:var(--idle-fg)}
 .card.att{border:2px solid var(--att);padding:11px 13px;
@@ -1600,7 +1602,9 @@ function saState(a){
 
 function card(s, now){
   const a = s.attention;
-  const st = a ? "att" : s.status;
+  // the card is painted by what the session is doing, the pill names the status itself -
+  // `shell` and `waiting` are idle cards, though their pills keep saying which they are
+  const st = a ? "att" : s.working ? "busy" : "idle";
   const pct = s.contextLimit ? Math.min(100, 100*s.context/s.contextLimit) : 0;
   const t = s.tokens;
   const subs = s.subagents.map(a => {
@@ -1633,7 +1637,7 @@ function card(s, now){
       ${s.pr ? `<a class="pill pr" href="${esc(s.pr.url)}" target="_blank" rel="noreferrer"
         title="${esc(s.pr.url)}">PR #${esc(String(s.pr.number))}</a>` : ""}
       <span class="pill ${st}">${st === "busy" ? '<i class="spin"></i>' : ""}${
-        a ? "needs you" : st}</span></div>
+        a ? "needs you" : s.status || "idle"}</span></div>
     <div class="repo">${s.repoUrl
       ? `<a href="${esc(s.repoUrl)}" target="_blank" rel="noreferrer"
           title="${esc(s.repoUrl)}">${esc(s.repo)}</a>` : esc(s.repo)}</div>
