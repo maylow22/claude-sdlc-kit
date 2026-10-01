@@ -1524,6 +1524,8 @@ const ago = (t, now) => dur(Math.max(0, now - t));
 // worked time stays in hours however long the range - "8.3 d" of work reads as days on end
 const hrs = s => s < 3600 ? Math.round(s/60)+" min"
   : s < 360000 ? (s/3600).toFixed(1)+" h" : Math.round(s/3600)+" h";
+// a day's work reads as a clock does - "6.5 h" takes a sum to turn into 6:30
+const hm = s => { const m = Math.round(s/60); return Math.floor(m/60)+":"+String(m%60).padStart(2,"0"); };
 // quotes included: most of what goes through esc() lands in an attribute, and a repository
 // path or a ticket title is allowed to contain one
 const esc = s => (s||"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",
@@ -2332,10 +2334,10 @@ async function tick(){
       : "";
     document.getElementById("kpis").innerHTML =
       planKpis(U, now)
-      + kpi(hrs(T.work[0]), "worked today", "", "How long agents worked today, every session's"
+      + kpi(hm(T.work[0]), "worked today", "", "How long agents worked today, every session's"
         + " turns added up - three sessions busy through one hour are three hours. Time spent"
         + " waiting on you is not in it.")
-      + kpi(hrs(T.work[1]), "worked today netto", "more-only", "How long today at least one agent"
+      + kpi(hm(T.work[1]), "worked today netto", "more-only", "How long today at least one agent"
         + " was working - the same hour with three sessions busy counts once.")
       + kpi(T.sessions, "sessions", "more-only", "Claude Code sessions open on this machine.")
       + kpi(T.busy, "busy", "more-only", "Sessions working on a turn right now.")
