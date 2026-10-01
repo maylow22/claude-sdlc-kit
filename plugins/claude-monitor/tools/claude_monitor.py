@@ -285,6 +285,8 @@ def subagents(transcript_path: str, session_id: str) -> list[dict]:
                 "model": t["model"],
                 "turns": t["turns"],
                 "tokens": {k: t[k] for k in ("input", "output", "cache_read", "cache_write")},
+                "context": t["context"],
+                "contextLimit": CONTEXT_LIMITS.get(t["model"] or "", DEFAULT_LIMIT),
                 "mtime": mtime,
                 "state": "stopped" if t["phase"] != "done" and now - mtime > SUBAGENT_STALE_SEC
                 else t["phase"] or "thinking",
@@ -1290,6 +1292,9 @@ h1{font-size:16px;margin:0 0 16px;font-weight:650}
 .sa-st .spin{margin:0}
 .sa-st.done{color:var(--idle)}
 .sa-st.stopped{color:var(--dim)}
+.sa-pie{flex:none;width:11px;height:11px;border-radius:99px;align-self:center;
+        background:conic-gradient(var(--bar) calc(var(--p)*1%),var(--bar2) 0)}
+.sa-pie.hi{background:conic-gradient(var(--warn) calc(var(--p)*1%),var(--bar2) 0)}
 .sa-name{font-weight:550;white-space:nowrap}
 .sa-desc{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .sa-tok{color:var(--dim);font-variant-numeric:tabular-nums;flex:none}
@@ -1594,11 +1599,19 @@ function card(s, now){
   const st = a ? "att" : s.status;
   const pct = s.contextLimit ? Math.min(100, 100*s.context/s.contextLimit) : 0;
   const t = s.tokens;
-  const subs = s.subagents.map(a => `<div>
+  const subs = s.subagents.map(a => {
+    const p = a.contextLimit ? Math.min(100, 100*a.context/a.contextLimit) : 0;
+    const tip = `context ${n(a.context)} / ${n(a.contextLimit)} (${Math.round(p)} %)\n`
+      + `in ${n(a.tokens.input)} · out ${n(a.tokens.output)} · `
+      + `cache read ${n(a.tokens.cache_read)} · cache write ${n(a.tokens.cache_write)}\n`
+      + `${a.turns} turns${a.model ? " · " + a.model : ""}`;
+    return `<div title="${esc(tip)}">
       ${saState(a)}
       <span class="sa-name">${esc(a.type)}</span>
       <span class="sa-desc">${esc(a.desc)}</span>
-      <span class="sa-tok">${n(a.tokens.output)} out · ${ago(a.mtime, now)}</span></div>`).join("");
+      <span class="sa-tok">${ago(a.mtime, now)}</span>
+      <i class="sa-pie${p >= 80 ? " hi" : ""}" style="--p:${p.toFixed(1)}"></i></div>`;
+  }).join("");
   const said = a && a.lastAgent;
   const att = a ? `<div class="att-row">&#9203; <b>${esc(a.label)}</b> &middot; ${ago(a.since, now)}
       ${a.detail ? `<span class="d">${esc(a.detail)}</span>` : ""}
