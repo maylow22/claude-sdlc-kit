@@ -1183,8 +1183,8 @@ PAGE = r"""<!doctype html>
 [hidden]{display:none!important}  /* .kpis/.grid set display, which beats the UA rule */
 body{margin:0;padding:18px;background:var(--bg);color:var(--fg);
      font:14px/1.45 ui-sans-serif,-apple-system,system-ui,sans-serif}
-h1{font-size:16px;margin:0 0 2px;font-weight:650}
-.sub{color:var(--dim);font-size:12px;margin-bottom:16px}
+h1{font-size:16px;margin:0 0 16px;font-weight:650}
+.sub{color:var(--dim);font-size:12px}
 .iv{background:none;border:1px solid var(--line);border-radius:5px;color:var(--dim);
     font:inherit;padding:0 6px;cursor:pointer;font-variant-numeric:tabular-nums}
 .iv:hover{border-color:var(--dim);color:var(--fg)}
@@ -1386,9 +1386,9 @@ document.documentElement.dataset.theme = _th === "light" || _th === "dark" ? _th
 <div class="corner">
   <button class="th" onclick="cycleTheme()"></button>
   <span class="ver">__VERSION__</span>
+  <span class="sub" id="sub">loading…</span>
 </div>
 <h1>Claudemon</h1>
-<div class="sub" id="sub">loading…</div>
 <div class="tabs">
   <button class="tab on" data-v="sessions" onclick="setView('sessions')"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect width="5" height="5" rx="1.2"/><rect x="7" width="5" height="5" rx="1.2"/><rect y="7" width="5" height="5" rx="1.2"/><rect x="7" y="7" width="5" height="5" rx="1.2"/></svg>sessions</button>
   <button class="tab" data-v="backlog" onclick="setView('backlog')"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect y="1" width="3" height="3" rx="1"/><rect x="4.7" y="2" width="7.3" height="1.4" rx=".7"/><rect y="8" width="3" height="3" rx="1"/><rect x="4.7" y="9" width="7.3" height="1.4" rx=".7"/></svg>backlog</button>
@@ -1503,13 +1503,15 @@ function resetAt(iso, now){
 // plan utilization as a KPI tile - the reset is the label, the long one is in the tooltip
 function planKpis(u, now){
   if(!u) return "";
+  // the numbers are only as fresh as the cache Claude Code fetched
+  const got = u.fetchedAt ? new Date(u.fetchedAt*1000).toLocaleTimeString() : "never";
   return u.limits.map(l => {
     const p = Math.max(0, Math.min(100, l.percent));
     const cls = (p >= 90 || l.severity === "critical") ? "max"
               : (p >= 70 || l.severity === "warning") ? "hot" : "";
     const at = l.resetsAt ? resetAt(l.resetsAt, now) : "?";
     return `<div class="kpi plan ${cls}${l.active ? " on" : ""}"`
-      + ` title="${esc(l.label)}">`
+      + ` title="${esc(l.label)} · fetched ${got}">`
       + `<b>${Math.round(p)} %</b><span>${esc(at)}`
       + `${l.tag ? " (" + esc(l.tag) + ")" : ""}</span>`
       + `<div class="bar"><i style="width:${p}%"></i></div></div>`;
