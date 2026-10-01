@@ -39,7 +39,10 @@ PROJECTS = Path.home() / ".claude" / "projects"
 SESSIONS = Path.home() / ".claude" / "sessions"
 CONFIG = Path.home() / ".claude.json"
 NOTIFY = Path.home() / ".claude" / "monitor" / "notify"
-SUBAGENT_ACTIVE_SEC = 60
+# A subagent that has not finished and has not written for this long is taken for
+# stopped - interrupted, or its session gone. It is not 60 s: a foreground Bash call can
+# legitimately run for ten minutes without a line reaching the transcript.
+SUBAGENT_STALE_SEC = 15 * 60
 
 # Safari's "Add to Dock" turns the dashboard into a standalone app, and takes its name
 # and its icon from the manifest below - the <title> is no good for the name, it carries
@@ -108,6 +111,8 @@ def _fresh() -> dict:
         "branch": None,
         "last_ts": None,
         "last_agent": None,
+        "phase": None,
+        "tool": None,
         "req": None,
     }
 
@@ -171,6 +176,19 @@ def scan(path: str) -> dict:
             said = agent_text(msg.get("content"))
             if said:
                 c["last_agent"] = {"text": said, "ts": e.get("timestamp")}
+            # one line per content block, so a turn that ends in a tool call is still
+            # "thinking" on its first blocks - the last line decides
+            content = msg.get("content")
+            tools = [b.get("name") for b in content if isinstance(b, dict)
+                     and b.get("type") == "tool_use"] if isinstance(content, list) else []
+            if tools:
+                c["phase"], c["tool"] = "tool", tools[-1]
+            elif msg.get("stop_reason") == "end_turn":
+                c["phase"] = "done"
+            else:
+                c["phase"] = "thinking"
+        elif e.get("type") == "user":
+            c["phase"] = "thinking"  # a tool result or a prompt - the model's turn again
         u = msg.get("usage")
         if not isinstance(u, dict):
             continue
@@ -268,7 +286,9 @@ def subagents(transcript_path: str, session_id: str) -> list[dict]:
                 "turns": t["turns"],
                 "tokens": {k: t[k] for k in ("input", "output", "cache_read", "cache_write")},
                 "mtime": mtime,
-                "active": now - mtime < SUBAGENT_ACTIVE_SEC,
+                "state": "stopped" if t["phase"] != "done" and now - mtime > SUBAGENT_STALE_SEC
+                else t["phase"] or "thinking",
+                "tool": t["tool"],
             }
         )
     out.sort(key=lambda a: a["mtime"], reverse=True)
@@ -1266,8 +1286,10 @@ h1{font-size:16px;margin:0 0 16px;font-weight:650}
 .toks b{color:var(--fg);font-weight:550;font-variant-numeric:tabular-nums;float:right}
 .subs{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
 .subs>div{display:flex;gap:7px;align-items:baseline;font-size:12px;padding:2px 0}
-.dot{width:6px;height:6px;border-radius:99px;background:var(--bar2);flex:none;margin-top:5px}
-.dot.on{background:var(--busy)}
+.sa-st{flex:none;width:10px;font-style:normal;font-size:10px;text-align:center;color:var(--busy)}
+.sa-st .spin{margin:0}
+.sa-st.done{color:var(--idle)}
+.sa-st.stopped{color:var(--dim)}
 .sa-name{font-weight:550;white-space:nowrap}
 .sa-desc{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .sa-tok{color:var(--dim);font-variant-numeric:tabular-nums;flex:none}
@@ -1559,13 +1581,21 @@ async function focusSession(btn){
   btn.disabled = false;
 }
 
+function saState(a){
+  if (a.state === "done") return `<i class="sa-st done" title="finished">&#10003;</i>`;
+  if (a.state === "stopped")
+    return `<i class="sa-st stopped" title="not finished, no activity for 15 min - interrupted?">&#9675;</i>`;
+  const what = a.state === "tool" ? `running ${a.tool}` : "thinking";
+  return `<i class="sa-st"><i class="spin" title="${esc(what)}"></i></i>`;
+}
+
 function card(s, now){
   const a = s.attention;
   const st = a ? "att" : s.status;
   const pct = s.contextLimit ? Math.min(100, 100*s.context/s.contextLimit) : 0;
   const t = s.tokens;
   const subs = s.subagents.map(a => `<div>
-      <i class="dot ${a.active?"on":""}"></i>
+      ${saState(a)}
       <span class="sa-name">${esc(a.type)}</span>
       <span class="sa-desc">${esc(a.desc)}</span>
       <span class="sa-tok">${n(a.tokens.output)} out · ${ago(a.mtime, now)}</span></div>`).join("");
