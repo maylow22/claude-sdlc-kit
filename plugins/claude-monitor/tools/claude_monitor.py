@@ -26,6 +26,7 @@ import glob
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import threading
@@ -83,6 +84,12 @@ LIMIT_TAGS = {"session": "5 h", "weekly_all": "week"}
 _ORIGINS: set[str] = set()  # the `Host` values the page may carry, filled in by main()
 _cache: dict[str, dict] = {}
 _usage: dict = {"mtime": 0.0, "data": None}
+# Nothing but `/usage` refreshes that cache, so the server runs it itself once the cache
+# is this many seconds old (0 turns it off). Claude Code refetches only when its copy is
+# over about a minute old, so a shorter interval buys nothing.
+USAGE_REFRESH = int(os.environ.get("CLAUDE_MONITOR_USAGE_REFRESH") or 3600)
+# its own cwd, so the empty project folder Claude Code makes for it is one and stays one
+USAGE_CWD = Path.home() / ".claude" / "monitor" / "usage"
 _lock = threading.Lock()
 
 
@@ -320,6 +327,34 @@ def read_usage() -> dict | None:
         _usage["mtime"] = mtime
         _usage["data"] = data
     return _usage["data"]
+
+
+def refresh_usage() -> None:
+    """Keep the plan tiles fresh by running `/usage` headless whenever the cache is older
+    than USAGE_REFRESH - a `/usage` typed in any session resets the clock as well.
+
+    No session persistence, so no transcript lands in the statistics. And
+    CLAUDE_MONITOR_AUTOSTART=0, because the SessionStart hook of that headless session
+    would otherwise restart this very server."""
+    claude = shutil.which("claude")
+    if not claude or USAGE_REFRESH <= 0:
+        return
+    env = {**os.environ, "CLAUDE_MONITOR_AUTOSTART": "0"}
+    while True:
+        u = read_usage()
+        age = time.time() - (u["fetchedAt"] if u else 0)
+        if age < USAGE_REFRESH:
+            time.sleep(USAGE_REFRESH - age)
+            continue
+        try:
+            USAGE_CWD.mkdir(parents=True, exist_ok=True)
+            subprocess.run([claude, "-p", "--no-session-persistence", "/usage"],
+                           cwd=USAGE_CWD, env=env, stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=120)
+        except (OSError, subprocess.SubprocessError):
+            pass  # logged out, offline - the tiles keep the old cache and say how old
+        # a run that did not move the cache must not turn into a busy loop
+        time.sleep(USAGE_REFRESH)
 
 
 def code_version() -> str:
@@ -2271,6 +2306,7 @@ def main() -> None:
     if args.port == 80:  # a browser leaves the port out when it is the scheme's default,
         _ORIGINS.update({"127.0.0.1", "localhost"})  # so `Host` arrives bare
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    threading.Thread(target=refresh_usage, daemon=True).start()
     print(f"Claude monitor: {url}  (Ctrl-C to quit)")
     if args.open:
         webbrowser.open(url)

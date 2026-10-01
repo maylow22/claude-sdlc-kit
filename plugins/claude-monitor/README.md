@@ -102,6 +102,7 @@ session. The whole hook takes ~0.3 s.
 |---|---|
 | `CLAUDE_MONITOR_PORT=8788` | a different port (hook and server alike) |
 | `CLAUDE_MONITOR_AUTOSTART=0` | the hook exits quietly and starts nothing |
+| `CLAUDE_MONITOR_USAGE_REFRESH=60` | run `/usage` once the plan cache is this many seconds old (default `3600`, `0` off) |
 
 The server is a **singleton per machine**, not per session — so a session start replaces the
 instance the *other* sessions are watching. That costs them nothing visible: it is back in well
@@ -357,7 +358,7 @@ not run the dashboard (`CLAUDE_MONITOR_AUTOSTART=0`).
 | repository + worktree | `git -C <cwd> rev-parse --show-toplevel --git-common-dir` — the common git dir is what a linked worktree shares with its repository |
 | the link on the repository | `git -C <cwd> config --get remote.origin.url` → `https://<host>/<owner>/<repo>`, composed rather than passed through, and only for `github.com` and `bitbucket.org`; any other host stays plain text |
 | the `PR #…` badge | `gh pr list --head <branch> --state open` in the session's `cwd` — a network call, so a worker thread makes it and the tick reads a cache (a hit is re-asked after 3 min, a miss after 15); the badge appears a tick after the branch does |
-| plan usage tiles | `~/.claude.json` → `cachedUsageUtilization` (the cache `/usage` fills) |
+| plan usage tiles | `~/.claude.json` → `cachedUsageUtilization` (the cache `/usage` fills); a worker thread runs `claude -p --no-session-persistence /usage` from `~/.claude/monitor/usage` once the cache is older than an hour |
 | restart + URL into the session | `hooks/session-start.sh` → `tools/restart.sh` (SessionStart hook) |
 | the reason for waiting on the user | `hooks/notification.py` → `~/.claude/monitor/notify/<sessionId>.json` |
 | per-project statistics | every `*.jsonl` under `~/.claude/projects` (the nested subagent and workflow transcripts included) → `.message.usage` by `.timestamp`, grouped by the repository root of `.cwd` |
@@ -377,8 +378,12 @@ whether the file is small or several megabytes.
 - The transcript's `message.model` **does not carry the `[1m]` suffix** — you cannot tell the
   1M tier from the log. The context limits therefore live in `CONTEXT_LIMITS` at the top of the
   script (Claude 5 family 1M, Haiku 4.5 200K); Claude Code may auto-compact earlier.
-- Usage is **not fetched from the API** — it reads the cache Claude Code writes itself. The age
-  of the cache is in the tooltip of the plan tiles; `/usage` in any session refreshes it.
+- Usage is **not fetched from the API** — it reads the cache Claude Code writes itself, and only
+  `/usage` writes it. So the server runs `/usage` headless every hour (`CLAUDE_MONITOR_USAGE_REFRESH`);
+  `/usage` in any session refreshes it too and resets that clock. The headless run has
+  `CLAUDE_MONITOR_AUTOSTART=0` — its SessionStart hook would otherwise restart the server that
+  started it. Claude Code refetches only once its copy is over about a minute old. The age of the
+  cache is in the tooltip of the plan tiles.
 - A `Notification` hook record is only invalidated by a write to the transcript. After you
   approve a permission, though, nothing is written to the transcript until the tool finishes —
   so for a long command "waiting for tool permission" can hang around for a while after you
