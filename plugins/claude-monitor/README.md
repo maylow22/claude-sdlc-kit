@@ -382,8 +382,8 @@ whether the file is small or several megabytes.
   `/usage` writes it. So the server runs `/usage` headless every hour (`CLAUDE_MONITOR_USAGE_REFRESH`);
   `/usage` in any session refreshes it too and resets that clock. The headless run has
   `CLAUDE_MONITOR_AUTOSTART=0` — its SessionStart hook would otherwise restart the server that
-  started it. Claude Code refetches only once its copy is over about a minute old. The age of the
-  cache is in the tooltip of the plan tiles.
+  started it. Claude Code refetches only once its copy is over about a minute old. When it was last
+  fetched is in the tooltip of the plan tiles.
 - A `Notification` hook record is only invalidated by a write to the transcript. After you
   approve a permission, though, nothing is written to the transcript until the tool finishes —
   so for a long command "waiting for tool permission" can hang around for a while after you
