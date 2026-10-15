@@ -90,7 +90,7 @@ _usage: dict = {"mtime": 0.0, "data": None}
 # Nothing but `/usage` refreshes that cache, so the server runs it itself once the cache
 # is this many seconds old (0 turns it off). Claude Code refetches only when its copy is
 # over about a minute old, so a shorter interval buys nothing.
-USAGE_REFRESH = int(os.environ.get("CLAUDE_MONITOR_USAGE_REFRESH") or 3600)
+USAGE_REFRESH = int(os.environ.get("CLAUDE_MONITOR_USAGE_REFRESH") or 300)
 # its own cwd, so the empty project folder Claude Code makes for it is one and stays one
 USAGE_CWD = Path.home() / ".claude" / "monitor" / "usage"
 _lock = threading.Lock()
