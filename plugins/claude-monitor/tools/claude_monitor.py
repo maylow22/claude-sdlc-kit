@@ -109,7 +109,7 @@ def _fresh() -> dict:
         "model": None,
         "effort": None,
         "branch": None,
-        "last_ts": None,
+        "last_active": None,
         "last_agent": None,
         "phase": None,
         "tool": None,
@@ -130,6 +130,14 @@ def agent_text(content) -> str:
         if isinstance(b, dict) and b.get("type") == "text"
     ).strip()
     return (txt[:AGENT_TEXT_MAX] + "\u2026") if len(txt) > AGENT_TEXT_MAX else txt
+
+
+def epoch(ts: str | None) -> float:
+    """A transcript timestamp (ISO 8601, UTC) in epoch seconds; 0 when there is none."""
+    try:
+        return float(calendar.timegm(time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def scan(path: str) -> dict:
@@ -160,8 +168,13 @@ def scan(path: str) -> dict:
             e = json.loads(raw)
         except ValueError:
             continue
-        if e.get("timestamp"):
-            c["last_ts"] = e["timestamp"]
+        # Only a prompt, a tool result or a reply is somebody working in the session. Claude
+        # Code writes lines of its own too - an `away_summary` minutes after a turn, a
+        # `bridge_status` on a reconnect, untimestamped titles and modes rewritten into many
+        # idle transcripts at once - so neither the file's mtime nor its last timestamp says
+        # when the session was last active.
+        if e.get("type") in ("user", "assistant") and e.get("timestamp"):
+            c["last_active"] = e["timestamp"]
         if e.get("gitBranch"):
             c["branch"] = e["gitBranch"]
         if e.get("effort"):
@@ -782,6 +795,7 @@ def build_state() -> dict:
             mtime = os.stat(path).st_mtime if path else 0
         except OSError:
             mtime = 0
+        active = epoch(t["last_active"]) or mtime  # mtime only before the first prompt
         subs = subagents(path, sid) if path else []
         backlog_root(s.get("cwd", ""), roots)  # for the tab count below; walks up, no reads
         branch = git_branch(s.get("cwd", ""), branches) or t["branch"]
@@ -815,13 +829,13 @@ def build_state() -> dict:
                     k: t[k]
                     for k in ("input", "output", "cache_read", "cache_write", "thinking")
                 },
-                "mtime": mtime,
+                "active": active,
                 "host": (host(s.get("pid"), procs) or {}).get("app"),
                 "subagents": subs,
             }
         )
 
-    sessions.sort(key=lambda s: (not s["attention"], not working(s["status"]), -s["mtime"]))
+    sessions.sort(key=lambda s: (not s["attention"], not working(s["status"]), -s["active"]))
     totals = {
         "sessions": len(sessions),
         "waiting": sum(1 for s in sessions if s["attention"]),
@@ -1744,7 +1758,7 @@ function card(s, now){
     ${s.worktree ? `<div class="wt">wt:${esc(s.worktree)}</div>` : ""}
     <div class="meta">${esc(s.model||"?")}${s.effort?" / "+esc(s.effort):""}
       <span class="det-only"> &middot; ${esc(s.kind)} &middot; pid ${s.pid}
-      <br>${s.turns} turns &middot; active ${ago(s.mtime, now)} ago</span></div>
+      <br>${s.turns} turns &middot; active ${ago(s.active, now)} ago</span></div>
     ${att}
     <div class="bar"><i style="width:${pct}%"></i></div>
     <div class="toks">

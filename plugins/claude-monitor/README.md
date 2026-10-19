@@ -185,6 +185,13 @@ The status vocabulary is open-ended: `busy`, `idle`, `waiting` and `shell` have 
 session therefore counts as **working unless it is plainly not**, so a status nobody has seen
 yet still lands on the right side of the sort and of the KPI count.
 
+The cards go **needs you → working → idle**, and within each group the most recently active
+session comes first. *Active* is the last prompt, tool result or reply in the transcript — not
+the file's mtime. Claude Code writes into transcripts on its own: an `away_summary` minutes after
+a turn, a `bridge_status` on a reconnect, and untimestamped titles and modes rewritten into many
+idle transcripts at once. By mtime, half a dozen sessions untouched for days all read `active 36
+min ago` and fell into whatever order the rewrite left them in.
+
 ## What it shows
 
 - **one KPI row** — it opens with plan utilization (5 h session, weekly, weekly model) as
@@ -207,7 +214,8 @@ yet still lands on the right side of the sort and of the KPI count.
   appears and nothing else changes
 - **tokens** — how full the context window is, as a bar and as `used / limit`
 - **the ⓘ on the card** — everything the headline leaves out, folded away until you tap it:
-  kind (interactive/background), pid, turns, how long ago the session was last active, and
+  kind (interactive/background), pid, turns, how long ago the session was last active (see
+  above — the last prompt, tool result or reply), and
   the token breakdown (output, input, cache read/write, thinking). It is per card, and the
   card keeps it open across the repaint every refresh does
 - **folded away** — worked today netto, subagents, turns, input tokens, thinking, cache read/write, plan tier.

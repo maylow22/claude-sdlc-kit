@@ -1,17 +1,18 @@
 ---
-description: Starts the live dashboard of all running Claude sessions (port 8787)
+description: Starts the live dashboard of all running Claude sessions (port 8787), or restarts it if it is already up
 argument-hint: "[port]"
 ---
 
-Start the session monitor in the background and give the user its URL. It is usually already
-running — the plugin's `SessionStart` hook starts it; this command is for the case where it was
-disabled (`CLAUDE_MONITOR_AUTOSTART=0`), somebody stopped it, or the hook reported that it could
-not be restarted.
+Start the session monitor in the background — or restart it, if it is already up — and give the
+user its URL. It is usually already running — the plugin's `SessionStart` hook starts it; this
+command is for the case where it was disabled (`CLAUDE_MONITOR_AUTOSTART=0`), somebody stopped
+it, the hook reported that it could not be restarted, or the running instance is on older code
+than the installed plugin.
 
 1. Ask who holds the port — never judge that by a bare `200`, which any local server would give:
    `bash "${CLAUDE_PLUGIN_ROOT}/tools/restart.sh" --status ${1:-8787}`
-   - `ours` → the dashboard is already up. **Do not start a second instance**; report the URL and
-     stop. Only if the user wants it on current code, run step 2 to replace it.
+   - `ours` → the dashboard is already up, possibly on older code; go to step 2 to replace it.
+     That is still one instance — the restart stops the old one before it starts the new one.
    - `foreign` → something else is on that port. Say so and stop — suggest another port
      (`/claude-monitor:start 8788`) rather than taking it.
    - `down` → nothing there; go to step 2.
