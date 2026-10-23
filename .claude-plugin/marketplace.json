@@ -15,6 +15,13 @@
       "source": "./plugins/claude-monitor"
     },
     {
+      "name": "flow-status",
+      "description": "A mod: a status line under the prompt with the topic being worked on and the step of the feature flow it stands at.",
+      "author": { "name": "Miloslav Marel" },
+      "category": "productivity",
+      "source": "./plugins/flow-status"
+    },
+    {
       "name": "feature",
       "description": "Feature development workflow — coding and E2E in the main context; plan review, lint, code review, security and docs in isolated subagents. Plus a versioned backlog for projects without Jira.",
       "author": { "name": "Miloslav Marel" },

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "flow-status",
+  "version": "0.1.0",
+  "description": "A status line under the prompt with the topic being worked on and the step of the feature flow it stands at.",
+  "author": {
+    "name": "Miloslav Marel",
+    "email": "miloslav.marel@gem.cz"
+  },
+  "keywords": ["mod", "status", "feature", "workflow"]
+}

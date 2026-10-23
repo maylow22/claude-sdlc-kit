@@ -1,8 +1,10 @@
 # claude-sdlc-kit
 
-A Claude Code plugin marketplace. Two plugins under `plugins/` — `claude-monitor` (the live
-session dashboard) and `feature` (the feature workflow). Both are `python3` stdlib and POSIX
-shell: there is nothing to build and nothing to install.
+A Claude Code plugin marketplace. Three plugins under `plugins/` — `claude-monitor` (the live
+session dashboard), `feature` (the feature workflow) and the mod `flow-status` (the topic and
+the step of the feature flow as a status line). The first two are `python3` stdlib and POSIX
+shell, the mod is plain JavaScript that Claude Code itself runs: there is nothing to build and
+nothing to install.
 
 ## Touching a plugin means raising its version
 

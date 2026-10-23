@@ -24,6 +24,7 @@ tracker from the repo rather than assuming them.
 claude plugin marketplace add maylow22/claude-sdlc-kit   # the repository
 claude plugin install claude-monitor@claude-kit          # the marketplace inside it
 claude plugin install feature@claude-kit
+claude plugin install flow-status@claude-kit             # optional: the status line
 ```
 
 The repository is `claude-sdlc-kit`, the marketplace it declares is `claude-kit` — the first
@@ -44,6 +45,7 @@ link to pass on. Later: `claude plugin update claude-monitor@claude-kit` (a rest
 |---|---|
 | [claude-monitor](plugins/claude-monitor) | Live dashboard of every session on the machine — plan utilization, status, tokens, context occupancy, subagent tree. A second view is the backlog board of the projects the sessions sit in, with `copy` on the open ticket for the `/feature:start <id>` that takes it up. Starts itself at session start, serves on `http://127.0.0.1:8787/`. Safari's **Add to Dock** turns it into a standalone app, **Claudemon**, with its own icon. |
 | [feature](plugins/feature) | `/feature:start` — the whole run of a feature: task → branch → plan → implementation → E2E → lint → review → docs → security → commit & PR. Which of the checking steps run is proposed per change and approved at the plan gate (`--fast`/`--full`); `--yolo` takes the workflow's own proposal at every approval gate instead of asking, up to the consultation — except dropping security, which still needs the user. Plus standalone `/feature:plan-review`, `/feature:commit`, `/feature:wiki`, and an opt-in backlog (`/feature:backlog-init` sets it up, then `/feature:backlog-add`, `/feature:backlog-list`, `/feature:backlog-groom`) in a versioned `BACKLOG.md` for projects without Jira — once it is set up, findings outside the task get offered for filing — `/feature:start BL-7` picks a ticket up and moves it to `BACKLOG.done.md` once its `Done when` is met. |
+| [flow-status](plugins/flow-status) | A mod: a status line under the prompt with the topic the session works on and the step of the feature flow it stands at (`◆ Levé menu konverzace  │  ▸ implementace 4/12`). The model names the topic and its own steps through a tool; the steps `feature` runs in subagents are read off the calls. |
 
 ## The feature workflow at a glance
 
