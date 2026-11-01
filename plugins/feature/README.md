@@ -6,7 +6,7 @@ and the subagents in [claude-monitor](../claude-monitor).
 
 | Command | What it does |
 |---|---|
-| `/feature:start <issue key \| URL \| BL-<n> \| description> [--fast\|--full] [--yolo]` | the whole run: task → branch → plan → implementation → E2E → lint → review → fixes → docs → consultation → commit & PR. Which of the checking steps actually run is decided at the plan gate; `--yolo` answers that gate and the others with the workflow's own proposal, so a ticket with a task and `Done when` set in advance runs unattended to the consultation |
+| `/feature:start <issue key \| URL \| BL-<n> \| description> [--fast\|--full] [--yolo] [--base <branch>]` | the whole run: task → branch → plan → implementation → E2E → lint → review → fixes → docs → consultation → commit & PR. Which of the checking steps actually run is decided at the plan gate; `--yolo` answers that gate and the others with the workflow's own proposal, so a ticket with a task and `Done when` set in advance runs unattended to the consultation; `--base` starts the feature from a long-lived branch other than `develop` |
 | `/feature:plan-review [path to plan]` | adversarial review of the plan against the real code, before anything gets written |
 | `/feature:commit` | git commit, no emoji and no Co-Authored-By, in the language of the repo's history |
 | `/feature:wiki [--scope=full\|incremental]` | the project wiki in `docs/wiki/` following the LLM-wiki pattern — discovers the stack itself |
@@ -162,6 +162,11 @@ exception: **security is not self-approvable even under `--yolo`.** The workflow
 propose dropping it, but only the user can click that through — a review whose whole point is
 independence cannot be waived by the author of the change it would review. E2E, code review and
 documentation stay self-approvable.
+
+`--base <branch>` is for work that lives on a long-lived branch of its own (a redesign, a
+release line): the feature branch is created from it and every diff and review runs against it,
+with no base-branch question. The branch has to exist, locally or on `origin`; a branch with no
+upstream is fast-forwarded from `origin/<branch>` when there is one instead of pulled.
 
 A step is never dropped when the change touches authentication, authorization or permissions,
 secrets, credentials or crypto, untrusted input, file upload, a new or changed endpoint,
