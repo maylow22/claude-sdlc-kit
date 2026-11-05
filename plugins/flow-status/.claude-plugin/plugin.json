@@ -1,8 +1,8 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "flow-status",
-  "version": "0.1.0",
-  "description": "A status line under the prompt with the topic being worked on and the step of the feature flow it stands at.",
+  "version": "0.2.0",
+  "description": "A status line under the prompt with the topic being worked on, the step of the feature flow it stands at and the address of what the session started.",
   "author": {
     "name": "Miloslav Marel",
     "email": "miloslav.marel@gem.cz"

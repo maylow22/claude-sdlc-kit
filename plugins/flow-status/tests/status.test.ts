@@ -76,3 +76,54 @@ test('an agent inside a subagent or workflow does not move the step', async ($, 
   await $.tool.call({ tool: 'Agent', subagent_type: 'feature:linter', prompt: 'x', description: 'x', agentId: 'a1' })
   expect(lines.at(-1)).toBe('◆ Export  │  ▸ code-review 7/12')
 })
+
+const ADDRESS = 'http://localhost:5176'
+
+test('an address is the third part of the line', async ($, on) => {
+  const lines = engine(on, 'develop')
+  await start($)
+
+  await $.tool.call({ tool: TOOL, topic: 'Export', phase: 'implementace', url: ADDRESS })
+  expect(lines.at(-1)).toBe(`◆ Export  │  ▸ implementace 4/12  │  ⇗ ${ADDRESS}`)
+})
+
+test('an empty url clears the address', async ($, on) => {
+  const lines = engine(on, 'develop')
+  await start($)
+  await $.tool.call({ tool: TOOL, topic: 'Export', phase: 'implementace', url: ADDRESS })
+
+  await $.tool.call({ tool: TOOL, url: '' })
+  expect(lines.at(-1)).toBe('◆ Export  │  ▸ implementace 4/12')
+})
+
+test('a phase without url keeps the address, hotovo too', async ($, on) => {
+  const lines = engine(on, 'develop')
+  await start($)
+  await $.tool.call({ tool: TOOL, topic: 'Export', phase: 'implementace', url: ADDRESS })
+
+  await $.tool.call({ tool: TOOL, phase: 'konzultace' })
+  expect(lines.at(-1)).toBe(`◆ Export  │  ▸ konzultace 11/12  │  ⇗ ${ADDRESS}`)
+
+  await $.tool.call({ tool: TOOL, phase: 'hotovo' })
+  expect(lines.at(-1)).toBe(`◆ Export  │  ✓ hotovo  │  ⇗ ${ADDRESS}`)
+})
+
+test('an address alone shows on a base branch, and clearing it empties the line', async ($, on) => {
+  const lines = engine(on, 'develop')
+  await start($)
+
+  await $.tool.call({ tool: TOOL, url: ADDRESS })
+  expect(lines.at(-1)).toBe(`⇗ ${ADDRESS}`)
+
+  await $.tool.call({ tool: TOOL, url: '' })
+  expect(lines.at(-1)).toBe(undefined)
+})
+
+test('a new /feature:start keeps the address', async ($, on) => {
+  const lines = engine(on, 'develop')
+  await start($)
+  await $.tool.call({ tool: TOOL, topic: 'Export', phase: 'commit', url: ADDRESS })
+
+  await $.tool.call({ tool: 'Skill', skill: 'feature:start' })
+  expect(lines.at(-1)).toBe(`▸ analyza 1/12  │  ⇗ ${ADDRESS}`)
+})

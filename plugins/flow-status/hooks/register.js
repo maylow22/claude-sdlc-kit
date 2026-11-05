@@ -1,6 +1,6 @@
-// The topic being worked on and the step of the feature flow it stands at, as this
-// plugin's status line under the prompt. The model reports the topic and its own steps
-// through a tool; the steps the feature plugin runs in subagents and skills are read
+// The topic being worked on, the step of the feature flow it stands at and the address of
+// what the session started, as this plugin's status line under the prompt. The model
+// reports the topic, the address and its own steps through a tool; the steps the feature plugin runs in subagents and skills are read
 // off the calls themselves, so the model does not have to remember them.
 
 const TOOL = 'mcp__flow-status__update'
@@ -39,17 +39,19 @@ const BASE_BRANCHES = new Set(['main', 'master', 'develop', ''])
 // The description is the only place the model reads how to use the tool: a security
 // plugin may skip a prompt.compose hook, a tool listed up front is always seen.
 const DESCRIPTION = [
-  "Updates the topic and workflow phase shown in the user's terminal status line.",
+  "Updates the topic, workflow phase and a clickable address shown in the user's terminal status line.",
   'Call it when you start working on a task and whenever its phase changes.',
   '- topic: a few words in Czech naming what is being solved (or the feature branch name when nothing better fits); pass it again only when the topic changes.',
   `- phase: one of ${[...PHASES, DONE].join(', ')}. Use "${DONE}" when the task is finished.`,
-  'Steps run by feature:* subagents and skills (plan review, E2E, lint, code review, docs, security) are tracked automatically. Do not call it for one-off questions.',
+  `- url: the one address the user opens to try out what you started (a dev server, a local stack: the web, not its API), e.g. http://localhost:5176. Pass it whenever you start such a thing, also on a port of its own and also outside any task, even as the only field; pass "" when you stop it. "${DONE}" keeps it.`,
+  'Steps run by feature:* subagents and skills (plan review, E2E, lint, code review, docs, security) are tracked automatically. Do not report a topic or phase for one-off questions.',
 ].join('\n')
 
 // Module state: a reload of the module starts the line over, which only matters while
 // the mod itself is being edited.
 let topic = null
 let phase = null
+let url = null
 let branch = ''
 
 async function refreshBranch($) {
@@ -59,7 +61,7 @@ async function refreshBranch($) {
 
 function show($) {
   const label = topic ?? (BASE_BRANCHES.has(branch) ? null : branch)
-  if (label === null && phase === null) {
+  if (label === null && phase === null && url === null) {
     $.ui.status(undefined)
     return
   }
@@ -72,7 +74,9 @@ function show($) {
         : index >= 0
           ? `▸ ${phase} ${index + 1}/${PHASES.length}`
           : `▸ ${phase}`
-  $.ui.status([label && `◆ ${label}`, step].filter(Boolean).join('  │  '))
+  // Plain text: the status line turns control characters into U+FFFD, so an OSC 8 link
+  // shows as garbage; terminals make a bare address clickable on their own.
+  $.ui.status([label && `◆ ${label}`, step, url && `⇗ ${url}`].filter(Boolean).join('  │  '))
 }
 
 export const register = on => {
@@ -85,6 +89,7 @@ export const register = on => {
         properties: {
           topic: { type: 'string', description: 'Short Czech name of what is being solved' },
           phase: { type: 'string', enum: [...PHASES, DONE] },
+          url: { type: 'string', description: 'Address to open what this session started; "" clears it' },
         },
       },
       isDeferred: false,
@@ -101,6 +106,8 @@ export const register = on => {
   on('tool.call', { tool: TOOL }, ($, e) => {
     if (e.topic) topic = e.topic.trim()
     if (e.phase) phase = e.phase
+    // Unlike topic, an empty string means something here: the server was stopped.
+    if (typeof e.url === 'string') url = e.url.trim() || null
     show($)
 
     return { result: 'ok' }
