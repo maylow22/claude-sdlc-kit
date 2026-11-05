@@ -1,6 +1,6 @@
 ---
 description: Runs the workflow for a new feature — branch, plan and implementation in the main context; plan review, E2E, lint, code review, security and docs in isolated subagents
-argument-hint: <issue key | issue URL | BL-<n> | task description> [--fast | --full] [--yolo]
+argument-hint: <issue key | issue URL | BL-<n> | task description> [--fast | --full] [--yolo] [--base <branch>]
 ---
 
 Workflow for developing a new feature. The argument is required — either an **issue key**
@@ -19,6 +19,12 @@ who answers the gates.
 ticket whose task and `Done when` were written in advance runs from the task to the finished diff
 without a single question. It is orthogonal to the other two: `--fast`/`--full` decide *which
 steps run*, `--yolo` decides *who clicks*, and `--fast --yolo` is a legitimate combination.
+
+**`--base <branch>`** names the branch the feature starts from and is diffed against — for work
+that lives on a long-lived branch of its own (a redesign, a release line) rather than on
+`develop`. It replaces the detection in step 2 together with its confirmation, so there is no
+base-branch gate left for `--yolo` to answer. The value has to pass the checks in step 2; one
+that does not is a catch stop.
 
 Of the two kinds of stop in this file, the flag touches only the first:
 
@@ -164,7 +170,11 @@ Never skip a step silently and never skip one that was not in the table at the g
 ### 2. Feature branch
 - Verify the working tree is clean (`git status`). If not, **stop** and ask the user — a catch
   stop, so it stops with `--yolo` too.
-- Determine the **base branch**: `develop` if the repo has it, otherwise the default branch
+- Determine the **base branch**. With **`--base <branch>`** it is that branch, unconfirmed — but
+  only when the value is a single token matching `^[A-Za-z0-9._][A-Za-z0-9._/-]*$` and the branch
+  exists, locally (`git branch --list -- <branch>`) or as `origin/<branch>` after
+  `git fetch origin`. Anything else is a catch stop, flag or no flag: say what is wrong and ask.
+  Without the flag: `develop` if the repo has it, otherwise the default branch
   (`git symbolic-ref refs/remotes/origin/HEAD`, typically `main`). Confirm it with the user if
   the repo has both and the choice is not obvious — with `--yolo` that confirmation is the one
   you give yourself; say in one line which branch you took. That branch is `baseBranch` for the
@@ -175,7 +185,11 @@ Never skip a step silently and never skip one that was not in the table at the g
   `Branch` line is already in the ticket. If the branch is named in the ticket but is nowhere in
   the repo, say so and create it as below instead.
 - Switch to it and pull the latest state (`git fetch origin && git checkout <baseBranch> &&
-  git pull --ff-only`).
+  git pull --ff-only`). A branch with no upstream (created `--no-track`, typical for a
+  long-lived `--base` branch) cannot be pulled: fast-forward it from `origin/<baseBranch>` with
+  `git merge --ff-only` when that exists, otherwise start from the local branch and say so in one
+  line. When `<baseBranch>` is already checked out in the current worktree the checkout is a
+  no-op; when it is checked out in **another** worktree, git refuses — that is a catch stop.
 - Create the branch `feature/<KEY>-<slug>` (e.g. `feature/IF-9-expand-details`). The slug is
   short, lowercase, hyphens instead of spaces, ASCII only. Without an issue key, just
   `feature/<slug>`. A backlog ticket behaves like a key: `feature/BL-7-<slug>`, the slug derived

@@ -80,6 +80,7 @@ composition over the reviewed plan at the step-3 gate and re-checks it against t
 `--fast`/`--full` pre-set the proposal, `--yolo` answers the gates with it — except security, which
 only the user can drop, and except a disqualifier (auth, secrets, untrusted input, endpoints,
 dependencies, migrations, payments, CI/CD, `.claude/**`), where the workflow asks regardless.
+`--base <branch>` starts the feature from a long-lived branch other than `develop`.
 
 The details (what the dashboard reads, how the workflow is split between the main context and
 the subagents) are in each plugin's README.
