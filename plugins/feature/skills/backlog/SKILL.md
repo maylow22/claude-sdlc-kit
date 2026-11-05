@@ -2,7 +2,7 @@
 name: backlog
 description: Keeps work that is not being done now in the project's versioned BACKLOG.md — both a finding you hit outside the current task and a feature you intend to build later. The backlog is opt-in: it exists in a project only once /feature:backlog-init has set it up, and where it is active, a finding gets offered for filing rather than only mentioned. Use when you run into a previous bug, stale documentation, a weakness, debt or an idea that does not belong in the current task — and whenever you catch yourself asking "should I fix this, or leave it?". Also on requests like "file a ticket", "add it to the backlog", "set up a backlog", "what is left to do", "go through the backlog".
 metadata:
-  version: 1.2.0
+  version: 1.3.0
 ---
 
 # Backlog
@@ -149,6 +149,12 @@ language: they are read by machine.
   is not enough — keep the `<!-- last-id: BL-N -->` marker at the end and raise it after every
   addition. The marker lives in `BACKLOG.md` and is never lowered, not even when the highest
   ticket moves to the archive.
+- **The next number comes from a shared counter, not from the marker alone.** The marker is in
+  git, so every branch has its own copy — two sessions on two branches would hand out the same
+  number. `/feature:backlog-add` takes it from `backlog-max-id`, one number in the Claude Code
+  project folder of the main checkout, which all worktrees of the repository share, and raises
+  both. The counter is never lowered either; the marker stays as the fallback for a clone that
+  has no counter.
 
 ## Closing a ticket — `BACKLOG.done.md`
 

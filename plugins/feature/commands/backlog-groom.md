@@ -47,8 +47,8 @@ Only what was approved:
 - merge duplicates into one ticket; the one that loses moves to the archive as
   `duplicate of BL-<n>`
 - rewrite unpickable ones and move mispriced ones — those stay in `BACKLOG.md`
-- **never lower the `<!-- last-id: BL-N -->` marker**, even when the highest ticket leaves —
-  numbers are not recycled
+- **never lower the `<!-- last-id: BL-N -->` marker** (nor the shared `backlog-max-id` counter
+  `/feature:backlog-add` keeps), even when the highest ticket leaves — numbers are not recycled
 
 Then say in three lines what changed, how many tickets are left and how many moved to the
 archive. **Do not commit** — leave both files in the working tree for the user.

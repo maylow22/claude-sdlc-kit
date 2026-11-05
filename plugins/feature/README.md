@@ -26,14 +26,24 @@ the current task ("should I fix this, or leave it?"); the three commands are the
 Everything lives in a single **`BACKLOG.md` in the repository root**, versioned, because a backlog
 a fresh clone does not know about is a private note. Priority is the **order of the sections**,
 not a field. A ticket is one closeable thing and always states its **impact** — what breaks if
-nobody does it — plus a verifiable `Done when`. Finished tickets are **deleted**, not archived;
-the history is in git, and a `<!-- last-id: BL-N -->` marker at the end of the file keeps numbers
-from being recycled.
+nobody does it — plus a verifiable `Done when`. Finished tickets **move, verbatim, to
+`BACKLOG.done.md`** with a `Closed` line, so a ticket never just disappears.
+
+Numbers are never recycled. The next one comes from a shared counter **outside git** —
+`backlog-max-id` in the Claude Code project folder of the repository's main checkout
+(`~/.claude/projects/<main checkout path, non-alphanumerics as ->/`). A number in a versioned
+file cannot do this job: every branch carries its own copy, so two sessions in two worktrees
+would hand out the same `BL-N` and collide only at the merge. All worktrees of a repository
+resolve to the same folder and share the counter. `/feature:backlog-add` also scans the backlog
+and its archive on every branch and worktree, takes the highest number it sees plus one, and
+writes the counter before the ticket. The `<!-- last-id: BL-N -->` marker at the end of
+`BACKLOG.md` is still raised with every ticket — it is the fallback for a clone that has no
+counter (another machine, a colleague).
 
 The loop closes with `/feature:start`: `BL-7` is a fourth kind of argument next to an issue key,
 a URL and a description. The workflow reads the ticket, makes its `Done when` the acceptance
-criterion for the plan and the E2E, writes the branch back into the ticket, and deletes it in
-step 12 — but only once the condition is really met. In the other direction, whatever the review
+criterion for the plan and the E2E, writes the branch back into the ticket, and moves it to
+`BACKLOG.done.md` in step 12 — but only once the condition is really met. In the other direction, whatever the review
 throws out as out of scope in step 8 goes through `/feature:backlog-add` instead of into the consultation,
 where it would die with the conversation.
 

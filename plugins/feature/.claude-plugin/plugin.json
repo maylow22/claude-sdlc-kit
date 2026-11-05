@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "feature",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Feature development workflow — coding and E2E in the main context; plan review, lint, code review, security and docs in isolated subagents. Plus an opt-in versioned backlog for projects without Jira.",
   "author": {
     "name": "Miloslav Marel",
