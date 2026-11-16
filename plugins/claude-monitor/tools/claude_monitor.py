@@ -1720,6 +1720,11 @@ function card(s, now){
   const st = a ? "att" : s.working ? "busy" : "idle";
   const pct = s.contextLimit ? Math.min(100, 100*s.context/s.contextLimit) : 0;
   const t = s.tokens;
+  // what the whole session spent, its subagents included - each runs in a transcript of
+  // its own, so the breakdown under the (i) is the main thread alone
+  const spent = [t, ...s.subagents.map(a => a.tokens)];
+  const tin = spent.reduce((x, k) => x + k.input + k.cache_read + k.cache_write, 0);
+  const tout = spent.reduce((x, k) => x + k.output, 0);
   const subs = s.subagents.map(a => {
     const p = a.contextLimit ? Math.min(100, 100*a.context/a.contextLimit) : 0;
     const tip = `context ${n(a.context)} / ${n(a.contextLimit)} (${Math.round(p)} %)\n`
@@ -1763,6 +1768,8 @@ function card(s, now){
     <div class="bar"><i style="width:${pct}%"></i></div>
     <div class="toks">
       <div>context <b>${n(s.context)} / ${n(s.contextLimit)}</b></div>
+      <div title="every token the session and its subagents sent (cache read and write included) and wrote"
+        >in / out <b>${n(tin)} / ${n(tout)}</b></div>
       <div class="det-only">output <b>${n(t.output)}</b></div>
       <div class="det-only">cache read <b>${n(t.cache_read)}</b></div>
       <div class="det-only">cache write <b>${n(t.cache_write)}</b></div>
