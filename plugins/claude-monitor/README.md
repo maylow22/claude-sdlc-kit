@@ -213,6 +213,8 @@ min ago` and fell into whatever order the rewrite left them in.
   linking straight to it. GitHub only, through `gh`; without `gh`, or logged out, no badge
   appears and nothing else changes
 - **tokens** — how full the context window is, as a bar and as `used / limit`
+- **in / out** — every token the session has sent and written so far, its subagents included;
+  the input side counts cache reads and writes too, so it is the bigger number by far
 - **the ⓘ on the card** — everything the headline leaves out, folded away until you tap it:
   kind (interactive/background), pid, turns, how long ago the session was last active (see
   above — the last prompt, tool result or reply), and
