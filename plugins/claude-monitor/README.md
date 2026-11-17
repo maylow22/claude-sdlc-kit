@@ -249,6 +249,12 @@ More than one project with a backlog → a row of buttons above the list picks o
 count` each. Which project and which ticket are open live in the page, not in the DOM, so the
 3 s repaint does not throw the selection away.
 
+The **search box** above the list narrows it as you type: a ticket stays when every word of
+the query occurs somewhere in it — id, title, fields or prose, closed tickets included. Case
+and diacritics do not matter, so `zaloha` finds `záloha`. A query that is exactly an id
+opens that ticket, even where `BL-24` also finds `BL-240` higher up. Esc clears it. The query lives in
+the page only, so it survives the repaint but not a reload.
+
 The board shows the projects that an **open session is sitting in** — the monitor does not go
 looking around the disk. The file is searched for upwards from the session's `cwd` and never
 outside the repository, because the backlog lives in the repository root and a session often
