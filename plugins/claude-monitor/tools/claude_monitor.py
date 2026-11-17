@@ -1441,6 +1441,10 @@ h1{font-size:16px;margin:0 0 16px;font-weight:650}
           overflow-x:auto;font-size:11.5px;margin:0 0 8px}
 .tk-b code,.tk-f code{background:var(--bar2);border-radius:4px;padding:0 3px;font-size:11.5px}
 .bl-none{color:var(--dim);font-size:13px}
+.blq{display:block;width:100%;max-width:360px;margin-bottom:12px;background:var(--card);
+     border:1px solid var(--line);border-radius:6px;color:var(--fg);font:inherit;font-size:13px;
+     padding:4px 9px}
+.blq:focus{outline:none;border-color:var(--bar)}
 /* --- the statistics view: filters in one row, then the chart, then the table the chart
    is a picture of. A row of the table is the filter for the chart above it. --- */
 .st-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
@@ -1527,7 +1531,10 @@ document.documentElement.dataset.theme = _th === "light" || _th === "dark" ? _th
 </div>
 <div class="kpis" id="kpis"></div>
 <div class="grid" id="grid"></div>
-<div id="backlog" hidden></div>
+<div id="backlog" hidden><div id="blPick"></div>
+  <input id="blq" class="blq" type="search" autocomplete="off" spellcheck="false"
+    placeholder="search id, title or text" title="every word has to occur in the ticket; Esc clears">
+  <div id="blBoard"></div></div>
 <div id="stats" hidden></div>
 <div class="tip" id="tip" hidden></div>
 <script>
@@ -1873,15 +1880,36 @@ let blProj = load("blProj", null), blSel = load("blSel", null);
 function setProj(root){ blProj = root; save("blProj", root); setSel(null); }
 function setSel(id){ blSel = id; save("blSel", id); }
 
+// Diacritics folded away on both sides: the backlog is often Czech prose, the query is
+// often typed without them.
+const fold = s => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const matches = (t, words) => {
+  const hay = fold([t.id, t.title, ...t.fields.flat(), t.body].join("\n"));
+  return words.every(w => hay.includes(w));
+};
+let blQuery = "", blData = null;  // the last board, repainted as you type without a fetch
+// `BL-24` also finds BL-240..249 and every ticket that mentions it, and the list is in the
+// file's order - so a query that is exactly an id opens that ticket. Once per keystroke,
+// not on every repaint, or a click on any other row would be undone three seconds later.
+let blJump = false;
+
+// [project picker, list + ticket] - two places, because the search box stands between them
 function board(d){
-  if(!d.projects.length) return `<div class="bl-none">No open session sits in a project
-    with a <code>BACKLOG.md</code>. <code>/feature:backlog-init</code> sets one up.</div>`;
+  if(!d.projects.length) return ["", `<div class="bl-none">No open session sits in a project
+    with a <code>BACKLOG.md</code>. <code>/feature:backlog-init</code> sets one up.</div>`];
   let p = d.projects.find(x => x.root === blProj);
   if(!p){ p = d.projects[0]; setProj(p.root); }
-  const groups = p.open.sections.map(s => [s.title, s.tickets, false]);
+  const words = fold(blQuery).split(/\s+/).filter(Boolean);
+  let groups = p.open.sections.map(s => [s.title, s.tickets, false]);
   if(p.done && p.done.count)  // closed tickets stay reachable, just dimmed and last
     groups.push(["closed", p.done.sections.flatMap(s => s.tickets), true]);
+  if(words.length)
+    groups = groups.map(([title, ts, done]) => [title, ts.filter(t => matches(t, words)), done])
+                   .filter(g => g[1].length);
   const all = groups.flatMap(g => g[1]);
+  const exact = blJump && words.length === 1 && all.find(t => fold(t.id) === words[0]);
+  blJump = false;
+  if(exact) setSel(exact.id);
   if(!all.some(t => t.id === blSel)) setSel(all.length ? all[0].id : null);
   const picker = d.projects.length > 1
     ? `<div class="tabs">` + d.projects.map(x => `<button class="tab${
@@ -1894,10 +1922,24 @@ function board(d){
       <span class="ti">${esc(t.title)}</span>${p.live.includes(t.id)
         ? `<i class="spin" title="a session is running on this ticket"></i>` : ""}</div>`).join("")).join("");
   const sel = all.find(t => t.id === blSel);
-  return picker + `<div class="bl"><div><div class="meta">${p.open.count} open${
+  return [picker, `<div class="bl"><div><div class="meta">${p.open.count} open${
+      words.length ? " &middot; " + all.length + " found" : ""}${
       p.open.lastId ? " &middot; last id " + esc(p.open.lastId) : ""} &middot; ${esc(p.root)}</div>
-      ${list}</div><div>${sel ? detail(sel, p) : ""}</div></div>`;
+      ${list || `<div class="bl-none">nothing matches</div>`}</div><div>${
+      sel ? detail(sel, p) : ""}</div></div>`];
 }
+
+function paintBoard(){
+  const [pick, rest] = board(blData);
+  document.getElementById("blPick").innerHTML = pick;
+  document.getElementById("blBoard").innerHTML = rest;
+}
+
+const blq = document.getElementById("blq");
+blq.addEventListener("input", () => { blQuery = blq.value; blJump = true; if(blData) paintBoard(); });
+blq.addEventListener("keydown", ev => {
+  if(ev.key === "Escape" && blq.value){ blq.value = ""; blq.dispatchEvent(new Event("input")); }
+});
 
 document.getElementById("backlog").addEventListener("click", ev => {
   const act = ev.target.closest("button[data-act]");
@@ -2328,7 +2370,8 @@ async function tickBacklog(){
   const d = await (await fetch("/api/backlog")).json();
   setBacklogTab(d.projects.length > 0);
   stamp();
-  document.getElementById("backlog").innerHTML = board(d);
+  blData = d;
+  paintBoard();
   document.title = (d.waiting ? `(${d.waiting}) ` : "") + "Claudemon";
 }
 
