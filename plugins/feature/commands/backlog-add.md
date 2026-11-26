@@ -1,5 +1,6 @@
 ---
-description: Files a ticket in the project backlog (BACKLOG.md) — work that is not being done now
+name: feature-backlog-add
+description: Files a ticket in the project backlog (BACKLOG.md) — work that is not being done now. Use when the user invokes /feature-backlog-add or /feature:backlog-add.
 argument-hint: <what should be done | nothing = take it from the conversation>
 ---
 

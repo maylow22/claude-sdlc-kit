@@ -1,5 +1,6 @@
 ---
-description: Overview of the project backlog — open tickets by priority, what is in progress and what to pick up next
+name: feature-backlog-list
+description: Overview of the project backlog — open tickets by priority, what is in progress and what to pick up next. Use when the user invokes /feature-backlog-list or /feature:backlog-list.
 argument-hint: [word to filter by | nothing = everything]
 ---
 

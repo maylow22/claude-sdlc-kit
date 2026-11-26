@@ -1,5 +1,6 @@
 ---
-description: Creates a git commit whose message summarizes the changes, in the language of the repo's history
+name: feature-commit
+description: Creates a git commit whose message summarizes the changes, in the language of the repo's history. Use when the user invokes /feature-commit or /feature:commit.
 ---
 
 Create a git commit with a message describing what the changes were about.

@@ -1,5 +1,6 @@
 ---
-description: Sets up a versioned backlog (BACKLOG.md) in the project — the one command allowed to create the file
+name: feature-backlog-init
+description: Sets up a versioned backlog (BACKLOG.md) in the project — the one command allowed to create the file. Use when the user invokes /feature-backlog-init or /feature:backlog-init.
 argument-hint: nothing
 ---
 
