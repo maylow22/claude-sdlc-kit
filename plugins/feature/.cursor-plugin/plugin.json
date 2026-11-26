@@ -1,0 +1,16 @@
+{
+  "name": "feature",
+  "displayName": "Feature",
+  "version": "0.7.0",
+  "description": "Feature development workflow — coding and E2E in the main context; plan review, lint, code review, security and docs in isolated subagents. Plus an opt-in versioned backlog for projects without Jira.",
+  "author": {
+    "name": "Miloslav Marel",
+    "email": "miloslav.marel@gem.cz"
+  },
+  "repository": "https://github.com/maylow22/claude-sdlc-kit",
+  "homepage": "https://github.com/maylow22/claude-sdlc-kit/tree/main/plugins/feature",
+  "keywords": ["workflow", "git", "jira", "review", "commit", "wiki", "backlog"],
+  "commands": "./commands",
+  "agents": "./agents",
+  "skills": "./skills"
+}

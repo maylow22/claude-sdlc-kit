@@ -17,6 +17,31 @@ and the subagents in [claude-monitor](../claude-monitor).
 `/feature:start` calls `/feature:commit` and `/feature:wiki` itself (the wiki through the
 doc-writer); you run them standalone when the workflow is not running.
 
+## Cursor
+
+Cursor installs this plugin from the marketplace at the repo root
+(`.cursor-plugin/marketplace.json`), not from Claude Code's plugin cache. In Customize,
+add `maylow22/claude-sdlc-kit` as a GitHub repository and install **feature**.
+
+Command identifiers there cannot contain a colon, and Claude Code ignores `name` on a
+command file, so both forms stay valid:
+
+| Cursor | Claude Code |
+|---|---|
+| `/feature-start` | `/feature:start` |
+| `/feature-plan-review` | `/feature:plan-review` |
+| `/feature-commit` | `/feature:commit` |
+| `/feature-wiki` | `/feature:wiki` |
+| `/feature-backlog-add` | `/feature:backlog-add` |
+| `/feature-backlog-list` | `/feature:backlog-list` |
+| `/feature-backlog-groom` | `/feature:backlog-groom` |
+| `/feature-backlog-init` | `/feature:backlog-init` |
+
+Subagents keep the `name` in their frontmatter (`plan-reviewer`, `e2e-tester`, `linter`,
+`reviewer`, `doc-writer`, `security-reviewer`). Cursor has no `Workflow` tool, so the
+reviews use the single-subagent fallback already written in the commands. The backlog
+skill loads as `/backlog`.
+
 ## The backlog
 
 For a project without Jira — and for everything that would otherwise be lost in the reply. The

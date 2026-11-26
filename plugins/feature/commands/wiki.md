@@ -1,5 +1,6 @@
 ---
-description: Generates or updates the project's technical wiki in docs/wiki/ following the LLM-wiki pattern — discovers the stack itself, assumes nothing
+name: feature-wiki
+description: Generates or updates the project's technical wiki in docs/wiki/ following the LLM-wiki pattern — discovers the stack itself, assumes nothing. Use when the user invokes /feature-wiki or /feature:wiki.
 argument-hint: "[--scope=full | --scope=incremental]"
 ---
 

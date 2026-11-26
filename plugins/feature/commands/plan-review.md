@@ -1,12 +1,14 @@
 ---
-description: Adversarial review of an implementation plan against the real code — before any of it gets written
+name: feature-plan-review
+description: Adversarial review of an implementation plan against the real code — before any of it gets written. Use when the user invokes /feature-plan-review or /feature:plan-review.
 argument-hint: "[path to the plan | empty = the plan from this session]"
 ---
 
 Have an implementation plan adversarially picked apart **before** any code is written from it.
 You do not review the plan yourself — that is what the isolated `feature:plan-reviewer` agent
 with a clean context is for, verifying it against the real code rather than against your
-argumentation.
+argumentation. In Cursor that subagent is `plan-reviewer` and there is no `Workflow` tool,
+so use the single-agent fallback in step 2.
 
 ## Which plan
 

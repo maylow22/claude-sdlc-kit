@@ -1,7 +1,20 @@
 ---
-description: Runs the workflow for a new feature — branch, plan and implementation in the main context; plan review, E2E, lint, code review, security and docs in isolated subagents
+name: feature-start
+description: Runs the workflow for a new feature — branch, plan and implementation in the main context; plan review, E2E, lint, code review, security and docs in isolated subagents. Use when the user invokes /feature-start or /feature:start.
 argument-hint: <issue key | issue URL | BL-<n> | task description> [--fast | --full] [--yolo] [--base <branch>]
 ---
+
+## Cursor
+
+This file is `/feature:start` in Claude Code and `/feature-start` in Cursor. Claude Code
+ignores `name` on a command file, so the colon form is unchanged there.
+
+In Cursor, call this plugin's subagents by the `name` in their frontmatter, without a
+`feature:` prefix: `plan-reviewer`, `e2e-tester`, `linter`, `reviewer`, `doc-writer`,
+`security-reviewer`. There is no `Workflow` tool and no `AskUserQuestion`. Where the steps
+below call a workflow, use the single-subagent fallback they already describe. Where they
+say to ask with `AskUserQuestion`, ask in the chat and wait. The gates, the catch stops
+and the rules at the bottom stay as written.
 
 Workflow for developing a new feature. The argument is required — either an **issue key**
 (e.g. `IF-9`), an **issue URL** (e.g. `https://<your-org>.atlassian.net/browse/IF-9`), a

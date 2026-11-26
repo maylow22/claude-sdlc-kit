@@ -1,5 +1,6 @@
 ---
-description: Maintenance of the project backlog — verifies tickets against the real code, proposes closing what is done into BACKLOG.done.md, merging duplicates and fixing what cannot be picked up
+name: feature-backlog-groom
+description: Maintenance of the project backlog — verifies tickets against the real code, proposes closing what is done into BACKLOG.done.md, merging duplicates and fixing what cannot be picked up. Use when the user invokes /feature-backlog-groom or /feature:backlog-groom.
 argument-hint: [BL-<n> ... | nothing = the whole backlog]
 ---
 
