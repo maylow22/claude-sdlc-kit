@@ -7,6 +7,7 @@ and the subagents in [claude-monitor](../claude-monitor).
 | Command | What it does |
 |---|---|
 | `/feature:start <issue key \| URL \| BL-<n> \| description> [--fast\|--full] [--yolo] [--base <branch>] [--codex]` | the whole run: task → branch → plan → implementation → E2E → lint → review → fixes → docs → consultation → commit & PR. Which of the checking steps actually run is decided at the plan gate; `--yolo` answers that gate and the others with the workflow's own proposal, so a ticket with a task and `Done when` set in advance runs unattended to the consultation; `--base` starts the feature from a long-lived branch other than `develop`; `--codex` adds the Codex CLI as a fourth code-review lens |
+| `/feature:codex <what /feature:start takes>` | hands the whole `/feature:start` run over to Codex — a new cmux tab with an interactive Codex next to this session; the diff can come back here for review |
 | `/feature:plan-review [path to plan]` | adversarial review of the plan against the real code, before anything gets written |
 | `/feature:commit` | git commit, no emoji and no Co-Authored-By, in the language of the repo's history |
 | `/feature:wiki [--scope=full\|incremental]` | the project wiki in `docs/wiki/` following the LLM-wiki pattern — discovers the stack itself |
@@ -257,3 +258,7 @@ The commands name Claude Code tools (`Agent`, `Workflow`, `AskUserQuestion` …)
 `Workflow`, so the reviews take the fallback the commands already describe — one subagent instead
 of the fan-out and its refutation round. The tool mapping itself lives in Codex's own
 `developer_instructions`, not here.
+
+`/feature:codex` starts such a run from Claude Code: it opens a new cmux tab (`cmux new-surface`)
+with `codex '$feature:start <argument>'` in the repo root, and the Claude session stays off that
+checkout until the run is done. Outside cmux it only prints the line to run in another terminal.
