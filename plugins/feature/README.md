@@ -6,7 +6,7 @@ and the subagents in [claude-monitor](../claude-monitor).
 
 | Command | What it does |
 |---|---|
-| `/feature:start <issue key \| URL \| BL-<n> \| description> [--fast\|--full] [--yolo] [--base <branch>]` | the whole run: task → branch → plan → implementation → E2E → lint → review → fixes → docs → consultation → commit & PR. Which of the checking steps actually run is decided at the plan gate; `--yolo` answers that gate and the others with the workflow's own proposal, so a ticket with a task and `Done when` set in advance runs unattended to the consultation; `--base` starts the feature from a long-lived branch other than `develop` |
+| `/feature:start <issue key \| URL \| BL-<n> \| description> [--fast\|--full] [--yolo] [--base <branch>] [--codex]` | the whole run: task → branch → plan → implementation → E2E → lint → review → fixes → docs → consultation → commit & PR. Which of the checking steps actually run is decided at the plan gate; `--yolo` answers that gate and the others with the workflow's own proposal, so a ticket with a task and `Done when` set in advance runs unattended to the consultation; `--base` starts the feature from a long-lived branch other than `develop`; `--codex` adds the Codex CLI as a fourth code-review lens |
 | `/feature:plan-review [path to plan]` | adversarial review of the plan against the real code, before anything gets written |
 | `/feature:commit` | git commit, no emoji and no Co-Authored-By, in the language of the repo's history |
 | `/feature:wiki [--scope=full\|incremental]` | the project wiki in `docs/wiki/` following the LLM-wiki pattern — discovers the stack itself |
@@ -143,7 +143,7 @@ single agent — the fan-out is for changes where one reviewer's one angle is a 
 | Script | Name | Lenses | Called from |
 |---|---|---|---|
 | `workflows/plan-review.js` | `feature:plan-review` | step order · reuse · edge cases | `/feature:plan-review`, step 3 |
-| `workflows/code-review.js` | `feature:code-review` | bugs · simplify · scope | step 7 |
+| `workflows/code-review.js` | `feature:code-review` | bugs · simplify · scope (+ codex with `--codex`) | step 7 |
 | `workflows/security-review.js` | `feature:security-review` | input & access · exposure · docs | step 10 |
 
 They are plain scripts in the plugin's `workflows/` directory, which Claude Code loads on startup —
@@ -177,6 +177,15 @@ documentation stay self-approvable.
 release line): the feature branch is created from it and every diff and review runs against it,
 with no base-branch question. The branch has to exist, locally or on `origin`; a branch with no
 upstream is fast-forwarded from `origin/<branch>` when there is one instead of pulled.
+
+`--codex` adds a fourth lens to the code review: the [Codex CLI](https://github.com/openai/codex)
+runs `codex exec -s read-only` over the same diff with the same brief (task, plan, branches), and
+its blockers and majors face the same refuting verifier as the other three — a different model
+family misses different things, and the verifier keeps its noise out of the main context. It is
+opt-in because the diff leaves for OpenAI, which a client repo may not allow. The binary is the
+first of `$CODEX_BIN`, `codex` on `PATH` and the copy bundled in `ChatGPT.app` that answers
+`--version`; when none does, or the run fails, the lens reports `CODEX UNAVAILABLE` and the review
+goes on with the other three. Plan and security reviews stay Claude-only.
 
 A step is never dropped when the change touches authentication, authorization or permissions,
 secrets, credentials or crypto, untrusted input, file upload, a new or changed endpoint,
@@ -228,3 +237,23 @@ the LLM-wiki pattern: code is the raw source (it never writes into it), `docs/wi
 own, and `CLAUDE.md`/`AGENTS.md`/`README.md` is the schema it obeys. `index.md` is the catalog,
 `log.md` an append-only history, and `--scope=incremental` rewrites only the pages touched by
 the diff since the last entry in the log.
+
+## In Codex
+
+Codex reads a Claude Code marketplace as it is, so the same plugin installs there too:
+
+```bash
+codex plugin marketplace add ~/Workspace/claude-kit
+codex plugin add feature@claude-kit
+```
+
+Codex turns the short commands into skills on its own (`feature:source-command-commit` and so on), but
+it silently skips any command longer than about 4 KB. For those three — `start`, `wiki`,
+`backlog-add` — `.codex-plugin/plugin.json` adds `codex/skills/`, where a skill only points at the
+command file, so `commands/` stays the one source. A new long command needs its pointer there, and a
+version bump goes into **both** manifests.
+
+The commands name Claude Code tools (`Agent`, `Workflow`, `AskUserQuestion` …). Codex has no
+`Workflow`, so the reviews take the fallback the commands already describe — one subagent instead
+of the fan-out and its refutation round. The tool mapping itself lives in Codex's own
+`developer_instructions`, not here.
