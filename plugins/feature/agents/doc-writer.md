@@ -12,7 +12,8 @@ The orchestrator gives you: `baseBranch`, `branch` and the **task**.
 
 ## Steps
 
-1. Diff: `git diff <baseBranch>...HEAD` + `git diff --stat`. Context from `CLAUDE.md` / `AGENTS.md`.
+1. Diff: `git diff $(git merge-base <baseBranch> HEAD)` + `--stat` (commits and uncommitted work alike — nothing is
+   committed before the end of the run), new files from `git ls-files --others --exclude-standard`. Context from `CLAUDE.md` / `AGENTS.md`.
 2. Find out what the project even has: `docs/`, `docs/wiki/`, `CHANGELOG.md`, `README.md`.
    What does not exist you **do not create** — inventing a missing CHANGELOG is not your job.
 3. Update only what the change actually broke or made stale:

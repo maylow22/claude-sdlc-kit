@@ -17,7 +17,8 @@ code came about — you do not need it and you do not ask for it.
    (`playwright.config.*`, `cypress.config.*`, `wdio.conf.*`, `.testcaferc.*`), an e2e test
    directory, an e2e script in the manifest. **Install nothing and introduce no runner**: a
    project without E2E is a `SKIPPED` result and one sentence, not an opportunity.
-2. Diff: `git diff <baseBranch>...HEAD` + `git diff --stat`. Read the affected files in full —
+2. Diff: `git diff $(git merge-base <baseBranch> HEAD)` + `--stat` (commits and uncommitted work alike — nothing is
+   committed before the end of the run), new files from `git ls-files --others --exclude-standard`. Read the affected files in full —
    a diff on its own misleads. Project context from `CLAUDE.md` / `AGENTS.md`.
 3. **Is the change reachable through the UI?** Pure tooling, infrastructure, build scripts or
    documentation are not — that is `SKIPPED` with the reason. Do not force a test through a

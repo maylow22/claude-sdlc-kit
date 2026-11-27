@@ -15,7 +15,8 @@ You get nothing else about how development went, and you do not ask for it.
 ## Steps
 
 1. Project context: `CLAUDE.md`, `AGENTS.md` (if present) — their conventions apply.
-2. Diff: `git diff <baseBranch>...HEAD` + `git diff --stat <baseBranch>...HEAD`.
+2. Diff: `git diff $(git merge-base <baseBranch> HEAD)` + `--stat` — the branch's commits **and** the uncommitted work,
+   because `/feature:start` commits only at the very end — plus new files from `git ls-files --others --exclude-standard`.
    Read whole files where you need to understand them — a diff on its own misleads.
 3. Run the `code-review` skill on this diff (correctness bugs).
 4. Go over quality through the lens of the `simplify` skill — duplication, dead code,

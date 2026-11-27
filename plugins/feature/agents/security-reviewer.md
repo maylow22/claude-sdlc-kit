@@ -19,7 +19,9 @@ supposed to do, and not knowing the intent keeps you from having a hole explaine
 
 ## Steps
 
-1. Diff: `git diff <baseBranch>...HEAD`. Read the affected files in full.
+1. Diff: `git diff $(git merge-base <baseBranch> HEAD)` — the branch's commits **and** the uncommitted work, because
+   `/feature:start` commits only at the very end — plus new files from `git ls-files --others --exclude-standard`.
+   Read the affected files in full.
 2. Run the `security-review` skill on this diff.
 3. Beyond the skill, go over the surface the change touches:
    - user input → validation, escaping, SQL/command/template injection

@@ -294,7 +294,8 @@ Workflow({ name: 'feature:code-review', args: { brief, baseBranch, branch } })
 
 - `brief` is the reviewer's whole prompt and contains **only** this: `baseBranch` and `branch`, the
   **task** confirmed in step 1, the **approved plan** from step 3, and the instruction that the
-  agent pulls its own diff (`git diff <baseBranch>...HEAD`).
+  agent pulls its own diff (`git diff $(git merge-base <baseBranch> HEAD)` plus untracked files — the work is not
+  committed until step 12, so `<baseBranch>...HEAD` alone would show the reviewer nothing).
 - The script fans `feature:reviewer` out over three lenses (bugs · simplify · scope against the
   plan) and then has an independent agent try to refute every `blocker` and `major`. It returns one
   record per lens: the prose report and the verdicts on its serious findings.
