@@ -19,7 +19,8 @@ will not get it.
    `composer.json`, or tool configs (`.prettierrc`, `eslint.config.*`, `biome.json`,
    `tsconfig.json`, `.golangci.yml`, `setup.cfg`). **Install nothing and invent no tool** —
    skip any step the project does not have and say so in the report.
-2. Scope: the files from `git diff --name-only <baseBranch>...HEAD`. **Never run the
+2. Scope: the files from `git diff --name-only $(git merge-base <baseBranch> HEAD)` plus `git ls-files --others --exclude-standard`
+   (the work is still uncommitted at this point). **Never run the
    formatter or linter over the whole repo** — reformatted foreign code would swallow the diff.
 3. Formatter (the project's own command, e.g. `npm run format`, `ruff format`, `gofmt -w`,
    `cargo fmt` — restricted to those files where the tool allows it).

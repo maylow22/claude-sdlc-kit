@@ -1,6 +1,6 @@
 ---
 description: Runs the workflow for a new feature — branch, plan and implementation in the main context; plan review, E2E, lint, code review, security and docs in isolated subagents
-argument-hint: <issue key | issue URL | BL-<n> | task description> [--fast | --full] [--yolo] [--base <branch>]
+argument-hint: <issue key | issue URL | BL-<n> | task description> [--fast | --full] [--yolo] [--base <branch>] [--codex]
 ---
 
 Workflow for developing a new feature. The argument is required — either an **issue key**
@@ -25,6 +25,12 @@ that lives on a long-lived branch of its own (a redesign, a release line) rather
 `develop`. It replaces the detection in step 2 together with its confirmation, so there is no
 base-branch gate left for `--yolo` to answer. The value has to pass the checks in step 2; one
 that does not is a catch stop.
+
+**`--codex`** adds a fourth lens to the code review in step 7: the Codex CLI reviews the same
+diff with the same brief, and its findings go through the same refutation round. Only on the
+flag, never on your own initiative — the diff and the brief leave for OpenAI, which a client repo
+may not allow. It changes nothing else, and it does not bring back a code review the composition
+dropped.
 
 Of the two kinds of stop in this file, the flag touches only the first:
 
@@ -292,9 +298,14 @@ tool asks for, so do not ask the user for it again:
 Workflow({ name: 'feature:code-review', args: { brief, baseBranch, branch } })
 ```
 
+With **`--codex`**, add `codex: true` to `args`. A Codex report that starts with
+`CODEX UNAVAILABLE` (no binary, a failed run) is not a finding — mention it in one line at the
+consultation and go on with the other three lenses.
+
 - `brief` is the reviewer's whole prompt and contains **only** this: `baseBranch` and `branch`, the
   **task** confirmed in step 1, the **approved plan** from step 3, and the instruction that the
-  agent pulls its own diff (`git diff <baseBranch>...HEAD`).
+  agent pulls its own diff (`git diff $(git merge-base <baseBranch> HEAD)` plus untracked files — the work is not
+  committed until step 12, so `<baseBranch>...HEAD` alone would show the reviewer nothing).
 - The script fans `feature:reviewer` out over three lenses (bugs · simplify · scope against the
   plan) and then has an independent agent try to refute every `blocker` and `major`. It returns one
   record per lens: the prose report and the verdicts on its serious findings.
@@ -302,7 +313,9 @@ Workflow({ name: 'feature:code-review', args: { brief, baseBranch, branch } })
   several lenses found as one, order by severity. That merged list is what you triage.
 - For a small diff (a handful of files, no new module) one `feature:reviewer` through `Agent` is
   enough; the same fallback applies if the workflow is unavailable in this session, just without
-  the refutation round.
+  the refutation round. With `--codex` the small-diff shortcut does not apply — the user asked
+  for the second model, so run the workflow; if it is unavailable, say at the consultation that
+  the Codex lens did not run.
 
 What does **not** belong in the prompt: what you tried and discarded, why you did something
 this way, what the user already approved, or your summary of the implementation. Knowing that,

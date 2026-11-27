@@ -22,6 +22,9 @@ So **every PR that touches `plugins/<name>/` raises that plugin's `version`.** C
 .github/scripts/check_plugin_versions.py main   # compares commits — commit the bump first
 ```
 
+A plugin that also ships `.codex-plugin/plugin.json` (`feature` does, for Codex) carries the
+same `version` there — CI checks only the Claude manifest.
+
 Semver as the change deserves — a fix is a patch, a new route or view a minor. After the merge
 an existing install takes it with `claude plugin update <plugin>@claude-kit`, which needs a
 restart to apply.
